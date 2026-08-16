@@ -1,7 +1,7 @@
 #ifndef _DOLPHIN_GX_GXCPU2EFB_H_
 #define _DOLPHIN_GX_GXCPU2EFB_H_
 
-#include "GXEnum.h"
+#include <dolphin/gx/GXEnum.h>
 
 void GXPokeAlphaMode(GXCompare func, u8 threshold);
 void GXPokeAlphaRead(GXAlphaReadMode mode);
