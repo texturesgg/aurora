@@ -158,7 +158,7 @@ void AXFXReverbStdCallback(struct AXFX_BUFFERUPDATE* bufferUpdate,
 // axfx.c
 void* AXFXAllocFunction(unsigned long size);
 void AXFXFreeFunction(void* ptr);
-void AXFXSetHooks(void* (*alloc_hook)(unsigned long),
+void AXFXSetHooks(void* (*alloc_hook)(size_t),
                   void (*free_hook)(void*));
 
 #endif // _DOLPHIN_AXFX_H_
