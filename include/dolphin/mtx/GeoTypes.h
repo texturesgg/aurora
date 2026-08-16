@@ -7,9 +7,23 @@
 extern "C" {
 #endif
 
+  typedef struct {
+    f32 x, y;
+  } Vec2, *Vec2Ptr, Point2d, *Point2dPtr;
+
+  typedef struct {
+    s32 x, y;
+  } S32Vec2, *S32Vec2Ptr;
+
   typedef struct Vec {
     f32 x, y, z;
   } Vec, *VecPtr, Point3d, *Point3dPtr;
+
+  typedef Vec Vec3;
+
+  typedef struct {
+    u8 x, y, z, w;
+  } U8Vec4, *U8Vec4Ptr;
 
   typedef struct {
     s16 x;
@@ -20,6 +34,8 @@ extern "C" {
   typedef struct {
     f32 x, y, z, w;
   } Quaternion, *QuaternionPtr, Qtrn, *QtrnPtr;
+
+  typedef Quaternion Vec4;
 
   typedef f32 Mtx[3][4];
 
