@@ -9,6 +9,23 @@ extern "C" {
 
 #define AR_STACK_INDEX_ENTRY_SIZE sizeof(u32)
 
+struct ARQRequest;
+
+typedef void (*ARQCallback)(struct ARQRequest*);
+
+struct ARQRequest {
+    /* 0x00 */ struct ARQRequest *next;
+    /* 0x04 */ u32 owner;
+    /* 0x08 */ u32 type;
+    /* 0x0C */ u32 priority;
+    /* 0x10 */ u32 source;
+    /* 0x14 */ u32 dest;
+    /* 0x18 */ u32 length;
+    /* 0x1C */ ARQCallback callback;
+};
+
+#define ARQ_DMA_ALIGNMENT 32
+
 #define ARAM_DIR_MRAM_TO_ARAM 0x00
 #define ARAM_DIR_ARAM_TO_MRAM 0x01
 

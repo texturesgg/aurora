@@ -40,6 +40,11 @@
 #define PAD_BUTTON_Y 0x0800
 #define PAD_BUTTON_MENU 0x1000
 #define PAD_BUTTON_START 0x1000
+#define PAD_STICK_UP (1 << 16)       // 0x10000
+#define PAD_STICK_DOWN (1 << 17)     // 0x20000
+#define PAD_STICK_LEFT (1 << 18)     // 0x40000
+#define PAD_STICK_RIGHT (1 << 19)    // 0x80000
+
 #ifdef TARGET_PC
 #define PAD_BUTTON_BACK 0x0002000
 #define PAD_BUTTON_GUIDE 0x0004000
@@ -58,6 +63,16 @@
 #define PAD_BUTTON_TOUCHPAD 0x8000000
 #define PAD_EXT_BUTTON_COUNT 15
 #endif
+
+#define PAD_CONFIRM (1ULL << 32)        // 0x100000000
+#define PAD_CANCEL (1ULL << 33)         // 0x200000000
+#define PAD_LR_START (1ULL << 34)       // 0x400000000
+#define PAD_LRA_START (1ULL << 35)      // 0x800000000
+#define PAD_ANY_UP (1ULL << 36)         // 0x1000000000
+#define PAD_ANY_DOWN (1ULL << 37)       // 0x2000000000
+#define PAD_ANY_LEFT (1ULL << 38)       // 0x4000000000
+#define PAD_ANY_RIGHT (1ULL << 39)      // 0x8000000000
+
 
 #define PAD_BUTTON_COUNT 12
 

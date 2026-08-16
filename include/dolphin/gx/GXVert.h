@@ -75,7 +75,6 @@ void GXTexCoord1u8(u8 s);
 void GXTexCoord1s8(s8 s);
 
 void GXTexCoord1x16(u16 index);
-void GXTexCoord1x8(u8 index);
 
 extern void GXEnd(void);
 
@@ -124,6 +123,8 @@ static inline void GXTexCoord2f32(const f32 u, const f32 v) {
 static inline void GXEnd(void) {}
 
 #endif
+
+void GXTexCoord1x8(u8 index);
 
 void GXCmd1u8(const u8 x);
 void GXCmd1u16(const u16 x);
