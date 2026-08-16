@@ -26,10 +26,18 @@ extern "C" {
   } U8Vec4, *U8Vec4Ptr;
 
   typedef struct {
+    int x, y;
+  } IntVec2, *IntVec2Ptr;
+
+  typedef struct {
     s16 x;
     s16 y;
     s16 z;
   } S16Vec, *S16VecPtr;
+
+  typedef struct {
+    s32 x, y, z;
+  } S32Vec, S32Vec3, *S32VecPtr, *S32Vec3Ptr;
 
   typedef struct {
     f32 x, y, z, w;
