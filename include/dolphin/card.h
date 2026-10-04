@@ -334,6 +334,11 @@ s32 CARDSetStatus(s32 chan, s32 fileNo, const CARDStat*  stat);
 s32 CARDWriteAsync(const CARDFileInfo*  fileInfo, const void* addr, s32 length, s32 offset, CARDCallback callback);
 s32 CARDWrite(const CARDFileInfo* fileInfo, const void* addr, s32 length, s32 offset);
 
+// aurora: runs the callbacks of every async call completed since the last
+// call, as the card interrupt would have. Call it where the game expects
+// interrupts (on PC, the host's alarm delivery).
+void aurora_card_deliver(void);
+
 #ifdef __cplusplus
 }
 #endif

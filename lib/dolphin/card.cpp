@@ -1,6 +1,8 @@
 #include "dolphin/card.h"
 
 #include <cstring>
+#include <deque>
+#include <mutex>
 #include <filesystem>
 
 #include "aurora/card.h"
@@ -16,6 +18,22 @@
 namespace {
 aurora::Module Log("aurora::card");
 std::array<std::unique_ptr<aurora::card::ICard>, 2> CardChannels = {{}};
+
+// Completions wait here until aurora_card_deliver, as the card interrupt
+// would deliver them later on the console: callers arm their "pending"
+// state after an async call returns, before the completion runs.
+struct CardCompletion {
+  CARDCallback callback;
+  s32 chan;
+  s32 result;
+};
+std::mutex sCompletionMutex;
+std::deque<CardCompletion> sCompletions;
+
+void deferCallback(CARDCallback callback, s32 chan, s32 result) {
+  std::lock_guard lock{sCompletionMutex};
+  sCompletions.push_back({callback, chan, result});
+}
 std::array<std::filesystem::path, 2> cardPaths;
 
 constexpr uint16_t CARD_SECTOR_SIZE = 8192;
@@ -387,7 +405,7 @@ s32 CARDCheckAsync(const s32 chan, const CARDCallback callback) {
   const auto& card = GET_CARD(chan);
   const auto res = static_cast<s32>(card->getError());
   if (callback) {
-    callback(chan, res);
+    deferCallback(callback, chan, res);
   }
   return static_cast<s32>(card->getError());
 }
@@ -411,7 +429,7 @@ s32 CARDCheckExAsync(const s32 chan, s32* xferBytes [[maybe_unused]], const CARD
   const auto& card = GET_CARD(chan);
   const auto res = static_cast<s32>(card->getError());
   if (callback) {
-    callback(chan, res);
+    deferCallback(callback, chan, res);
   }
   return static_cast<s32>(card->getError());
 }
@@ -442,7 +460,7 @@ s32 CARDCreateAsync(const s32 chan, const char* fileName, const u32 size, CARDFi
   }
   const auto res = CARDCreate(chan, fileName, size, fileInfo);
   if (callback) {
-    callback(chan, res);
+    deferCallback(callback, chan, res);
   }
   return res;
 }
@@ -472,7 +490,7 @@ s32 CARDDeleteAsync(const s32 chan, const char* fileName, const CARDCallback cal
   }
   const auto res = CARDDelete(chan, fileName);
   if (callback) {
-    callback(chan, res);
+    deferCallback(callback, chan, res);
   }
   return res;
 }
@@ -501,7 +519,7 @@ s32 CARDFastDeleteAsync(const s32 chan, const s32 fileNo, const CARDCallback cal
   }
   const auto res = CARDFastDelete(chan, fileNo);
   if (callback) {
-    callback(chan, res);
+    deferCallback(callback, chan, res);
   }
   return res;
 }
@@ -542,7 +560,7 @@ s32 CARDFormatAsync(const s32 chan, const CARDCallback callback) {
   }
   const auto res = CARDFormat(chan);
   if (callback) {
-    callback(chan, res);
+    deferCallback(callback, chan, res);
   }
   return res;
 }
@@ -675,7 +693,7 @@ s32 CARDMountAsync(const s32 chan, void* workArea [[maybe_unused]], const CARDCa
   }
   const auto& card = GET_CARD(chan);
   if (card && attachCallback) {
-    attachCallback(chan, static_cast<s32>(card->getError()));
+    deferCallback(attachCallback, chan, static_cast<s32>(card->getError()));
   }
   return CARD_RESULT_READY;
 }
@@ -744,7 +762,7 @@ s32 CARDRenameAsync(const s32 chan, const char* oldName, const char* newName, co
   }
   const auto res = CARDRename(chan, oldName, newName);
   if (callback) {
-    callback(chan, res);
+    deferCallback(callback, chan, res);
   }
   return res;
 }
@@ -803,7 +821,7 @@ s32 CARDSetStatusAsync(const s32 chan, const s32 fileNo, const CARDStat* stat, c
   }
   const auto res = CARDSetStatus(chan, fileNo, stat);
   if (callback) {
-    callback(chan, res);
+    deferCallback(callback, chan, res);
   }
   return res;
 }
@@ -869,7 +887,7 @@ s32 CARDReadAsync(const CARDFileInfo* fileInfo, void* addr, const s32 length, co
                   const CARDCallback callback) {
   const auto res = CARDRead(fileInfo, addr, length, offset);
   if (callback) {
-    callback(fileInfo->chan, res);
+    deferCallback(callback, fileInfo->chan, res);
   }
   return res;
 }
@@ -900,8 +918,23 @@ s32 CARDWriteAsync(const CARDFileInfo* fileInfo, const void* addr, const s32 len
                    const CARDCallback callback) {
   const auto res = CARDWrite(fileInfo, addr, length, offset);
   if (callback) {
-    callback(fileInfo->chan, res);
+    deferCallback(callback, fileInfo->chan, res);
   }
   return res;
 }
+}
+
+void aurora_card_deliver() {
+  for (;;) {
+    CardCompletion completion;
+    {
+      std::lock_guard lock{sCompletionMutex};
+      if (sCompletions.empty()) {
+        return;
+      }
+      completion = sCompletions.front();
+      sCompletions.pop_front();
+    }
+    completion.callback(completion.chan, completion.result);
+  }
 }
