@@ -487,6 +487,11 @@ public:
     }
   }
 
+  void wait_idle() {
+    std::unique_lock lk{m_mutex};
+    m_doneCv.wait(lk, [&] { return !m_running || (m_queue.empty() && m_activeBlock == nullptr); });
+  }
+
   void wait(const DVDCommandBlock* block) {
     if (block == nullptr) {
       return;
@@ -731,6 +736,8 @@ void aurora_dvd_close(void) {
 }
 
 void DVDInit(void) {}
+
+void aurora_dvd_wait_idle(void) { s_worker.wait_idle(); }
 
 void aurora_dvd_deliver(void) {
   for (;;) {

@@ -141,6 +141,9 @@ void DVDInit(void);
 /// Run the callbacks of asynchronous commands the worker finished, as the
 /// console's interrupt would. The host calls it where interrupts are taken.
 void aurora_dvd_deliver(void);
+/// Wait until the worker has finished every queued command, so a host that
+/// wants reproducible timing can make reads finish at a frame boundary.
+void aurora_dvd_wait_idle(void);
 int DVDReadAbsAsyncPrio(DVDCommandBlock* block, void* addr, s32 length, s32 offset, DVDCBCallback callback, s32 prio);
 int DVDSeekAbsAsyncPrio(DVDCommandBlock* block, s32 offset, DVDCBCallback callback, s32 prio);
 int DVDReadAbsAsyncForBS(DVDCommandBlock* block, void* addr, s32 length, s32 offset, DVDCBCallback callback);
