@@ -123,7 +123,7 @@ struct AXFX_CHORUS {
     /* 0x98 */ u32 period;
 };
 
-extern void* (*__AXFXAlloc)(unsigned long);
+extern void* (*__AXFXAlloc)(size_t);
 extern void (*__AXFXFree)(void*);
 
 // chorus.c
@@ -156,7 +156,7 @@ void AXFXReverbStdCallback(struct AXFX_BUFFERUPDATE* bufferUpdate,
                            struct AXFX_REVERBSTD* reverb);
 
 // axfx.c
-void* AXFXAllocFunction(unsigned long size);
+void* AXFXAllocFunction(size_t size);
 void AXFXFreeFunction(void* ptr);
 void AXFXSetHooks(void* (*alloc_hook)(size_t),
                   void (*free_hook)(void*));
