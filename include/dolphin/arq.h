@@ -42,6 +42,11 @@ void ARQSetChunkSize(u32 size);
 u32 ARQGetChunkSize(void);
 BOOL ARQCheckInit(void);
 
+// aurora: runs the transfers and callbacks of every request posted since the
+// last call, as the DMA interrupt would have. Call it where the game expects
+// interrupts (on PC, the host's alarm delivery).
+void aurora_arq_deliver(void);
+
 #ifdef __cplusplus
 }
 #endif

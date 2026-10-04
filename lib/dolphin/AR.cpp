@@ -2,6 +2,9 @@
 #include "../internal.hpp"
 #include "dolphin/os.h"
 
+#include <deque>
+#include <mutex>
+
 static aurora::Module Log("aurora::ar");
 
 static u32 AR_StackPointer;
@@ -82,8 +85,28 @@ u32 ARGetSize(void) { return aurora::g_config.mem2Size; }
 #if !defined(_MSC_VER)
 #pragma mark ARQ
 #endif
-void ARQPostRequest(ARQRequest* request, u32 owner, u32 type, u32 priority, uintptr_t source, uintptr_t dest,
-                    u32 length, ARQCallback callback) {
+namespace {
+// Requests wait here until aurora_arq_deliver, as a DMA would complete later
+// on the console: callers expect to finish setting up after posting, before
+// the completion runs.
+std::mutex sArqMutex;
+// The request's own fields are 32-bit, too narrow for a host address, so a
+// job keeps the transfer's own copy
+struct ArqJob {
+  ARQRequest* request;
+  u32 type;
+  uintptr_t source;
+  uintptr_t dest;
+  u32 length;
+  ARQCallback callback;
+};
+std::deque<ArqJob> sArqQueue;
+
+void arqTransfer(const ArqJob& job) {
+  const u32 type = job.type;
+  const uintptr_t source = job.source;
+  const uintptr_t dest = job.dest;
+  const u32 length = job.length;
   // Emulate ARAM DMA transfers using memcpy.
   // type 0 = MRAM -> ARAM, type 1 = ARAM -> MRAM
   if (type == ARAM_DIR_MRAM_TO_ARAM) {
@@ -101,10 +124,39 @@ void ARQPostRequest(ARQRequest* request, u32 owner, u32 type, u32 priority, uint
       memcpy(hostDst, aramSrc, length);
     }
   }
+}
+} // namespace
 
-  // Immediately invoke the callback (synchronous on PC, no DMA latency)
-  if (callback) {
-    callback((uintptr_t)request);
+void ARQPostRequest(ARQRequest* request, u32 owner, u32 type, u32 priority, uintptr_t source, uintptr_t dest,
+                    u32 length, ARQCallback callback) {
+  // The SDK records the parameters in the request; callbacks read them back
+  request->next = nullptr;
+  request->owner = owner;
+  request->type = type;
+  request->priority = priority;
+  request->source = static_cast<u32>(source);
+  request->dest = static_cast<u32>(dest);
+  request->length = length;
+  request->callback = callback;
+  std::lock_guard lock{sArqMutex};
+  sArqQueue.push_back(ArqJob{request, type, source, dest, length, callback});
+}
+
+void aurora_arq_deliver() {
+  for (;;) {
+    ArqJob job;
+    {
+      std::lock_guard lock{sArqMutex};
+      if (sArqQueue.empty()) {
+        return;
+      }
+      job = sArqQueue.front();
+      sArqQueue.pop_front();
+    }
+    arqTransfer(job);
+    if (job.callback) {
+      job.callback(reinterpret_cast<uintptr_t>(job.request));
+    }
   }
 }
 
