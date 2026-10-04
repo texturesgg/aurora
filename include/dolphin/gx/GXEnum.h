@@ -10,7 +10,7 @@ extern "C" {
 #ifdef TARGET_PC
 #include <stdbool.h>
 
-typedef bool GXBool;
+typedef AURORA_BOOL GXBool;
 #else
 typedef u8 GXBool;
 #endif

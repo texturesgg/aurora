@@ -167,8 +167,8 @@ typedef struct PADKeyAxisBinding {
 
 /* New API to facilitate controller interactions */
 typedef struct PADDeadZones {
-  bool emulateTriggers;
-  bool useDeadzones;
+  AURORA_BOOL emulateTriggers;
+  AURORA_BOOL useDeadzones;
   u16 stickDeadZone;
   u16 substickDeadZone;
   u16 leftTriggerActivationZone;
@@ -235,7 +235,7 @@ s32 PADGetNativeButtonPressed(u32 port);
 /* Returns the first native axis which is currently pulled halfway or more */
 PADSignedNativeAxis PADGetNativeAxisPulled(u32 port);
 void PADRestoreDefaultMapping(u32 port);
-void PADBlockInput(bool block);
+void PADBlockInput(AURORA_BOOL block);
 
 void PADSetVirtualStatus(u32 port, const PADStatus* status);
 void PADClearVirtualStatus(u32 port);

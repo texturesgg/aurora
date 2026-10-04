@@ -33,8 +33,8 @@ VIRetraceCallback VISetPostRetraceCallback(VIRetraceCallback cb);
 
 #ifdef TARGET_PC
 void VISetWindowTitle(const char* title);
-void VISetWindowFullscreen(bool fullscreen);
-bool VIGetWindowFullscreen();
+void VISetWindowFullscreen(AURORA_BOOL fullscreen);
+AURORA_BOOL VIGetWindowFullscreen();
 void VISetWindowSize(uint32_t width, uint32_t height);
 void VISetWindowPosition(uint32_t x, uint32_t y);
 void VICenterWindow();

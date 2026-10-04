@@ -36,6 +36,13 @@ typedef volatile f64 vf64;
 typedef char *Ptr;
 
 #include <stdbool.h>
+/* The C type of the C++ bool, whatever a C program calls bool (a game may
+ * make its bool an int) */
+#ifdef __cplusplus
+#define AURORA_BOOL bool
+#else
+#define AURORA_BOOL _Bool
+#endif
 typedef int BOOL;
 #ifndef FALSE
 #define FALSE 0
