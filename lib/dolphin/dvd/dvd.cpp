@@ -341,6 +341,14 @@ void finishCommand(DVDCommandBlock* block, s32 result, u32 transferred) {
   setCommandResult(block, stateForResult(result), transferred);
 }
 
+struct Completed {
+  DVDCommandBlock* block;
+  DVDCBCallback callback;
+  s32 result;
+};
+std::mutex s_completedMutex;
+std::deque<Completed> s_completed;
+
 class DvdWorker {
 public:
   ~DvdWorker() { stop(); }
@@ -507,7 +515,7 @@ private:
       m_activeBlock = block;
       atomic_store_release(block->state, DVD_STATE_BUSY);
       lk.unlock();
-      process_command(block);
+      process_command(block, true);
       lk.lock();
       m_activeBlock = nullptr;
       if (m_cancelActiveBlock == block) {
@@ -533,13 +541,21 @@ private:
     return {result, transferred};
   }
 
-  void process_command(DVDCommandBlock* block) {
+  // A command run on the worker calls back when aurora_dvd_deliver runs: on
+  // the console the callback is an interrupt, which the game masks around
+  // the state it shares with it.
+  void process_command(DVDCommandBlock* block, bool deferred = false) {
     auto [result, transferred] = perform_command(block);
     if (consume_active_cancel(block)) {
       result = DVD_RESULT_CANCELED;
       transferred = 0;
     }
     finishCommand(block, result, transferred);
+    if (deferred && block->callback != nullptr) {
+      std::lock_guard lk{s_completedMutex};
+      s_completed.push_back(Completed{block, block->callback, result});
+      return;
+    }
     if (block->callback != nullptr) {
       block->callback(result, block);
     }
@@ -715,6 +731,21 @@ void aurora_dvd_close(void) {
 }
 
 void DVDInit(void) {}
+
+void aurora_dvd_deliver(void) {
+  for (;;) {
+    Completed done;
+    {
+      std::lock_guard lk{s_completedMutex};
+      if (s_completed.empty()) {
+        return;
+      }
+      done = s_completed.front();
+      s_completed.pop_front();
+    }
+    done.callback(done.result, done.block);
+  }
+}
 
 const u8* DVDGetDOLLocation(s32* out_size) {
   if (s_partition == nullptr) {
