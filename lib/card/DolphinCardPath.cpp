@@ -9,9 +9,9 @@
 #ifndef NOMINMAX
 #define NOMINMAX
 #endif
-#include <Windows.h>
+#include <windows.h>
 #include <winreg.h>
-#include <shlobj_core.h>
+#include <shlobj.h>
 #endif
 
 #include <SDL3/SDL_filesystem.h>

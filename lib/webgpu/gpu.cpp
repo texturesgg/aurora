@@ -75,6 +75,33 @@ static std::atomic_bool g_vsyncEnabled = true;
 
 namespace {
 
+#if defined(WEBGPU_DAWN) && defined(__MINGW32__)
+// Dawn's DLL is built with MSVC, so a MinGW program can't call the C++
+// constructor of dawn::native::DawnInstanceDescriptor. The struct is plain
+// data (a chained struct and its fields, in DawnNative.h), so this one has the
+// same layout and sets what the constructor sets.
+struct DawnInstanceDescriptor : wgpu::ChainedStruct {
+  DawnInstanceDescriptor() { sType = wgpu::SType::DawnInstanceDescriptor; }
+  uint32_t additionalRuntimeSearchPathsCount = 0;
+  const char* const* additionalRuntimeSearchPaths = nullptr;
+  dawn::platform::Platform* platform = nullptr;
+  dawn::native::BackendValidationLevel backendValidationLevel = dawn::native::BackendValidationLevel::Disabled;
+  bool beginCaptureOnStartup = false;
+  WGPULoggingCallbackInfo loggingCallbackInfo = WGPU_LOGGING_CALLBACK_INFO_INIT;
+
+  void SetLoggingCallback(wgpu::LoggingCallback<void>* callback) {
+    loggingCallbackInfo.callback = [](WGPULoggingType type, struct WGPUStringView message, void* callback_param,
+                                      void*) {
+      (*reinterpret_cast<wgpu::LoggingCallback<void>*>(callback_param))(static_cast<wgpu::LoggingType>(type), message);
+    };
+    loggingCallbackInfo.userdata1 = reinterpret_cast<void*>(callback);
+    loggingCallbackInfo.userdata2 = nullptr;
+  }
+};
+#else
+using DawnInstanceDescriptor = dawn::native::DawnInstanceDescriptor;
+#endif
+
 AuroraLogLevel wgpu_log_level(wgpu::LoggingType type) {
   switch (type) {
   case wgpu::LoggingType::Verbose:
@@ -789,7 +816,7 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
         .enabledToggleCount = instanceToggles.size(),
         .enabledToggles = instanceToggles.data(),
     }};
-    dawn::native::DawnInstanceDescriptor dawnInstanceDescriptor{};
+    DawnInstanceDescriptor dawnInstanceDescriptor{};
     dawnInstanceDescriptor.nextInChain = &instanceTogglesDescriptor;
     dawnInstanceDescriptor.backendValidationLevel = dawn::native::BackendValidationLevel::Disabled;
     dawnInstanceDescriptor.SetLoggingCallback(wgpu_log);

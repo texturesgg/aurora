@@ -43,7 +43,12 @@ endif ()
 
 if (CMAKE_SYSTEM_NAME STREQUAL Windows)
     # stuff for fetching system info.
-    target_link_libraries(aurora_core PRIVATE wbemuuid.lib comsuppw.lib ntdll.lib DXGI.lib)
+    if (MINGW)
+        # comutil.h is header-only in MinGW (no comsuppw), and its import libraries are lowercase
+        target_link_libraries(aurora_core PRIVATE wbemuuid ole32 oleaut32 ntdll dxgi)
+    else ()
+        target_link_libraries(aurora_core PRIVATE wbemuuid.lib comsuppw.lib ntdll.lib DXGI.lib)
+    endif ()
 elseif (APPLE)
     target_sources(aurora_core PRIVATE lib/system_info_mac.mm)
 endif ()
