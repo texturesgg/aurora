@@ -396,6 +396,7 @@ public:
   }
 
   void enqueue(DVDCommandBlock* block) {
+    aurora::g_asyncPosts.fetch_add(1, std::memory_order_relaxed);
     bool executeNow = false;
     {
       std::lock_guard lk(m_mutex);
@@ -739,17 +740,19 @@ void DVDInit(void) {}
 
 void aurora_dvd_wait_idle(void) { s_worker.wait_idle(); }
 
-void aurora_dvd_deliver(void) {
+int aurora_dvd_deliver(void) {
+  int delivered = 0;
   for (;;) {
     Completed done;
     {
       std::lock_guard lk{s_completedMutex};
       if (s_completed.empty()) {
-        return;
+        return delivered;
       }
       done = s_completed.front();
       s_completed.pop_front();
     }
+    delivered++;
     done.callback(done.result, done.block);
   }
 }

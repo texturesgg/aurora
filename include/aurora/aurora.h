@@ -128,6 +128,11 @@ typedef struct {
 
 AuroraInfo aurora_initialize(int argc, char* argv[], const AuroraConfig* config);
 void aurora_shutdown();
+
+// Count of asynchronous DVD, ARQ and CARD requests posted so far. A host that
+// re-runs frames compares it before and after one to see whether the frame
+// started a transfer, which completes outside the frame's own state.
+uint32_t aurora_async_posts();
 const AuroraEvent* aurora_update();
 bool aurora_begin_frame();
 void aurora_end_frame();

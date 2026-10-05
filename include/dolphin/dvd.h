@@ -140,7 +140,7 @@ typedef struct DVDDriveInfo {
 void DVDInit(void);
 /// Run the callbacks of asynchronous commands the worker finished, as the
 /// console's interrupt would. The host calls it where interrupts are taken.
-void aurora_dvd_deliver(void);
+int aurora_dvd_deliver(void);
 /// Wait until the worker has finished every queued command, so a host that
 /// wants reproducible timing can make reads finish at a frame boundary.
 void aurora_dvd_wait_idle(void);

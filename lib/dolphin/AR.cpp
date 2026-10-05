@@ -140,20 +140,23 @@ void ARQPostRequest(ARQRequest* request, u32 owner, u32 type, u32 priority, uint
   request->callback = callback;
   std::lock_guard lock{sArqMutex};
   sArqQueue.push_back(ArqJob{request, type, source, dest, length, callback});
+  aurora::g_asyncPosts.fetch_add(1, std::memory_order_relaxed);
 }
 
-void aurora_arq_deliver() {
+int aurora_arq_deliver() {
+  int delivered = 0;
   for (;;) {
     ArqJob job;
     {
       std::lock_guard lock{sArqMutex};
       if (sArqQueue.empty()) {
-        return;
+        return delivered;
       }
       job = sArqQueue.front();
       sArqQueue.pop_front();
     }
     arqTransfer(job);
+    delivered++;
     if (job.callback) {
       job.callback(reinterpret_cast<uintptr_t>(job.request));
     }

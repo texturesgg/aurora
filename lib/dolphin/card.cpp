@@ -33,6 +33,7 @@ std::deque<CardCompletion> sCompletions;
 void deferCallback(CARDCallback callback, s32 chan, s32 result) {
   std::lock_guard lock{sCompletionMutex};
   sCompletions.push_back({callback, chan, result});
+  aurora::g_asyncPosts.fetch_add(1, std::memory_order_relaxed);
 }
 std::array<std::filesystem::path, 2> cardPaths;
 
@@ -924,17 +925,19 @@ s32 CARDWriteAsync(const CARDFileInfo* fileInfo, const void* addr, const s32 len
 }
 }
 
-void aurora_card_deliver() {
+int aurora_card_deliver() {
+  int delivered = 0;
   for (;;) {
     CardCompletion completion;
     {
       std::lock_guard lock{sCompletionMutex};
       if (sCompletions.empty()) {
-        return;
+        return delivered;
       }
       completion = sCompletions.front();
       sCompletions.pop_front();
     }
+    delivered++;
     completion.callback(completion.chan, completion.result);
   }
 }

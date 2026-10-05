@@ -5,6 +5,7 @@
 #include <aurora/aurora.h>
 
 #include <array>
+#include <atomic>
 #include <cassert>
 #include <cstdint>
 #include <cstring>
@@ -179,6 +180,8 @@ ALWAYS_INLINE constexpr auto underlying(T value) noexcept -> std::underlying_typ
 #define UNIMPLEMENTED() FATAL("UNIMPLEMENTED: {}", __FUNCTION__)
 
 namespace aurora {
+// Bumped by every asynchronous request (aurora_async_posts).
+inline std::atomic<uint32_t> g_asyncPosts{0};
 extern AuroraConfig g_config;
 extern uint32_t g_sdlCustomEventsStart;
 extern char g_gameName[4];
