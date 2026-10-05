@@ -77,11 +77,13 @@ namespace {
 
 #if defined(WEBGPU_DAWN) && defined(__MINGW32__)
 // Dawn's DLL is built with MSVC, so a MinGW program can't call the C++
-// constructor of dawn::native::DawnInstanceDescriptor. The struct is plain
-// data (a chained struct and its fields, in DawnNative.h), so this one has the
-// same layout and sets what the constructor sets.
-struct DawnInstanceDescriptor : wgpu::ChainedStruct {
-  DawnInstanceDescriptor() { sType = wgpu::SType::DawnInstanceDescriptor; }
+// constructor of dawn::native::DawnInstanceDescriptor, and can't declare the
+// class either: GCC places a derived class's first small member in the tail
+// padding of its non-POD base (wgpu::ChainedStruct), where MSVC starts it at
+// the next boundary. This has MSVC's layout (the chain as a member, not a
+// base) and sets what the constructor sets.
+struct DawnInstanceDescriptor {
+  WGPUChainedStruct chain{.next = nullptr, .sType = WGPUSType_DawnInstanceDescriptor};
   uint32_t additionalRuntimeSearchPathsCount = 0;
   const char* const* additionalRuntimeSearchPaths = nullptr;
   dawn::platform::Platform* platform = nullptr;
@@ -89,6 +91,8 @@ struct DawnInstanceDescriptor : wgpu::ChainedStruct {
   bool beginCaptureOnStartup = false;
   WGPULoggingCallbackInfo loggingCallbackInfo = WGPU_LOGGING_CALLBACK_INFO_INIT;
 
+  wgpu::ChainedStruct* asChain() { return reinterpret_cast<wgpu::ChainedStruct*>(&chain); }
+  void SetNextInChain(const wgpu::ChainedStruct* next) { chain.next = const_cast<WGPUChainedStruct*>(reinterpret_cast<const WGPUChainedStruct*>(next)); }
   void SetLoggingCallback(wgpu::LoggingCallback<void>* callback) {
     loggingCallbackInfo.callback = [](WGPULoggingType type, struct WGPUStringView message, void* callback_param,
                                       void*) {
@@ -98,8 +102,12 @@ struct DawnInstanceDescriptor : wgpu::ChainedStruct {
     loggingCallbackInfo.userdata2 = nullptr;
   }
 };
+#define AURORA_DAWN_NEXT_IN_CHAIN(desc, next) (desc).SetNextInChain(next)
+#define AURORA_DAWN_AS_CHAIN(desc) (desc).asChain()
 #else
 using DawnInstanceDescriptor = dawn::native::DawnInstanceDescriptor;
+#define AURORA_DAWN_NEXT_IN_CHAIN(desc, next) ((desc).nextInChain = (next))
+#define AURORA_DAWN_AS_CHAIN(desc) (&(desc))
 #endif
 
 AuroraLogLevel wgpu_log_level(wgpu::LoggingType type) {
@@ -817,13 +825,13 @@ bool initialize(AuroraBackend auroraBackend, bool allowCpu) {
         .enabledToggles = instanceToggles.data(),
     }};
     DawnInstanceDescriptor dawnInstanceDescriptor{};
-    dawnInstanceDescriptor.nextInChain = &instanceTogglesDescriptor;
+    AURORA_DAWN_NEXT_IN_CHAIN(dawnInstanceDescriptor, &instanceTogglesDescriptor);
     dawnInstanceDescriptor.backendValidationLevel = dawn::native::BackendValidationLevel::Disabled;
     dawnInstanceDescriptor.SetLoggingCallback(wgpu_log);
 #ifdef TRACY_ENABLE
     dawnInstanceDescriptor.platform = tracy_dawn_platform();
 #endif
-    instanceDescriptor.nextInChain = &dawnInstanceDescriptor;
+    instanceDescriptor.nextInChain = AURORA_DAWN_AS_CHAIN(dawnInstanceDescriptor);
 #endif
     g_instance = wgpu::CreateInstance(&instanceDescriptor);
     if (!g_instance) {
