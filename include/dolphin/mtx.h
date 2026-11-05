@@ -4,6 +4,10 @@
 #include <dolphin/mtx/GeoTypes.h>
 #include <dolphin/types.h>
 
+#ifndef GEKKO
+#include <math.h>
+#endif
+
 #ifdef __cplusplus
 extern "C" {
 #endif
@@ -40,31 +44,29 @@ void C_MTXTranspose(const Mtx src, Mtx xPose);
 u32 C_MTXInverse(const Mtx src, Mtx inv);
 u32 C_MTXInvXpose(const Mtx src, Mtx invX);
 
-#ifdef GEKKO
+// The paired-single routines compute what the Gekko computes, bit for bit
+// (lib/dolphin/mtx/psmtx.c), on every platform.
 void PSMTXIdentity(Mtx m);
 void PSMTXCopy(const Mtx src, Mtx dst);
 void PSMTXConcat(const Mtx a, const Mtx b, Mtx ab);
-void PSMTXConcatArray(const Mtx a, const Mtx* srcBase, Mtx* dstBase, u32 count);
 void PSMTXTranspose(const Mtx src, Mtx xPose);
 u32 PSMTXInverse(const Mtx src, Mtx inv);
+
+#ifdef GEKKO
+void PSMTXConcatArray(const Mtx a, const Mtx* srcBase, Mtx* dstBase, u32 count);
 u32 PSMTXInvXpose(const Mtx src, Mtx invX);
 #else
-#define PSMTXIdentity MTXIdentity
-#define PSMTXCopy MTXCopy
-#define PSMTXConcat MTXConcat
 #define PSMTXConcatArray MTXConcatArray
-#define PSMTXTranspose MTXTranspose
-#define PSMTXInverse MTXInverse
 #define PSMTXInvXpose MTXInvXpose
 #endif
 
 #ifdef MTX_USE_PS
-#define MTXIdentity C_MTXIdentity
-#define MTXCopy C_MTXCopy
-#define MTXConcat C_MTXConcat
+#define MTXIdentity PSMTXIdentity
+#define MTXCopy PSMTXCopy
+#define MTXConcat PSMTXConcat
 #define MTXConcatArray C_MTXConcatArray
-#define MTXTranspose C_MTXTranspose
-#define MTXInverse C_MTXInverse
+#define MTXTranspose PSMTXTranspose
+#define MTXInverse PSMTXInverse
 #define MTXInvXpose C_MTXInvXpose
 #else
 #define MTXIdentity C_MTXIdentity
@@ -82,10 +84,11 @@ void C_MTXMultVecSR(const Mtx m, const Vec* src, Vec* dst);
 void C_MTXMultVecArraySR(const Mtx m, const Vec* srcBase, Vec* dstBase, u32 count);
 void C_MTXROMultVecArray(const ROMtx m, const Vec *srcBase, Vec *dstBase, u32 count);
 
-#ifdef GEKKO
 void PSMTXMultVec(const Mtx m, const Vec* src, Vec* dst);
-void PSMTXMultVecArray(const Mtx m, const Vec* srcBase, Vec* dstBase, u32 count);
 void PSMTXMultVecSR(const Mtx m, const Vec* src, Vec* dst);
+
+#ifdef GEKKO
+void PSMTXMultVecArray(const Mtx m, const Vec* srcBase, Vec* dstBase, u32 count);
 void PSMTXMultVecArraySR(const Mtx m, const Vec* srcBase, Vec* dstBase, u32 count);
 void PSMTXMultS16VecArray(const Mtx m, const S16Vec* srcBase, Vec* dstBase, u32 count);
 
@@ -94,9 +97,7 @@ void PSMTXROSkin2VecArray(const ROMtx m0, const ROMtx m1, const f32* wtBase, con
                           Vec* dstBase, u32 count);
 void PSMTXROMultS16VecArray(const ROMtx m, const S16Vec* srcBase, Vec* dstBase, u32 count);
 #else
-#define PSMTXMultVec MTXMultVec
 #define PSMTXMultVecArray MTXMultVecArray
-#define PSMTXMultVecSR MTXMultVecSR
 #define PSMTXMultVecArraySR MTXMultVecArraySR
 #define PSMTXMultS16VecArray MTXMultS16VecArray
 
@@ -106,9 +107,9 @@ void PSMTXROMultS16VecArray(const ROMtx m, const S16Vec* srcBase, Vec* dstBase, 
 #endif
 
 #ifdef MTX_USE_PS
-#define MTXMultVec C_MTXMultVec
+#define MTXMultVec PSMTXMultVec
 #define MTXMultVecArray C_MTXMultVecArray
-#define MTXMultVecSR C_MTXMultVecSR
+#define MTXMultVecSR PSMTXMultVecSR
 #define MTXMultVecArraySR C_MTXMultVecArraySR
 #define MTXMultS16VecArray PSMTXMultS16VecArray
 
@@ -138,50 +139,58 @@ void C_MTXRotAxisRad(Mtx m, const Vec* axis, f32 rad);
 
 void C_MTXReorder(const Mtx src, ROMtx dst);
 
-#ifdef GEKKO
 void PSMTXQuat(Mtx m, const Quaternion* q);
-void PSMTXReflect(Mtx m, const Vec* p, const Vec* n);
-
 void PSMTXTrans(Mtx m, f32 xT, f32 yT, f32 zT);
-void PSMTXTransApply(const Mtx src, Mtx dst, f32 xT, f32 yT, f32 zT);
 void PSMTXScale(Mtx m, f32 xS, f32 yS, f32 zS);
+void PSMTXRotTrig(Mtx m, char axis, f32 sinA, f32 cosA);
+
+#ifdef GEKKO
+void PSMTXReflect(Mtx m, const Vec* p, const Vec* n);
+void PSMTXTransApply(const Mtx src, Mtx dst, f32 xT, f32 yT, f32 zT);
 void PSMTXScaleApply(const Mtx src, Mtx dst, f32 xS, f32 yS, f32 zS);
 
 void PSMTXRotRad(Mtx m, char axis, f32 rad);
-void PSMTXRotTrig(Mtx m, char axis, f32 sinA, f32 cosA);
 void PSMTXRotAxisRad(Mtx m, const Vec* axis, f32 rad);
 
 void PSMTXReorder(const Mtx src, ROMtx dest);
 #else
-#define PSMTXQuat MTXQuat
 #define PSMTXReflect MTXReflect
-#define PSMTXTrans MTXTrans
 #define PSMTXTransApply MTXTransApply
-#define PSMTXScale MTXScale
 #define PSMTXScaleApply MTXScaleApply
 #define PSMTXRotRad MTXRotRad
-#define PSMTXRotTrig MTXRotTrig
-#define PSMTXRotAxisRad MTXRotAxisRad
-
-#define PSMTXRotRad MTXRotRad
-#define PSMTXRotAxisRad MTXRotAxisRad
 
 #define PSMTXReorder MTXReorder
+
+// PSMTXRotAxisRad, and MTXRotRad under MTX_USE_PS, take their sine and cosine from the C
+// library, as the console's do. They are inline so that it is the caller's C library: a
+// game that brings its own math functions (the console's) gets them.
+void aurora_PSMTXRotAxisTrig(Mtx m, const Vec* axis, f32 sinA, f32 cosA);
+
+static inline void PSMTXRotAxisRad(Mtx m, const Vec* axis, f32 rad) {
+  aurora_PSMTXRotAxisTrig(m, axis, sinf(rad), cosf(rad));
+}
 #endif
 
 #ifdef MTX_USE_PS
-#define MTXQuat C_MTXQuat
+#define MTXQuat PSMTXQuat
 #define MTXReflect C_MTXReflect
-#define MTXTrans C_MTXTrans
+#define MTXTrans PSMTXTrans
 #define MTXTransApply C_MTXTransApply
-#define MTXScale C_MTXScale
+#define MTXScale PSMTXScale
 #define MTXScaleApply C_MTXScaleApply
+#define MTXRotTrig PSMTXRotTrig
+#define MTXRotAxisRad PSMTXRotAxisRad
+#ifdef GEKKO
 #define MTXRotRad C_MTXRotRad
-#define MTXRotTrig C_MTXRotTrig
-#define MTXRotAxisRad C_MTXRotAxisRad
+#else
+static inline void aurora_MTXRotRad(Mtx m, char axis, f32 rad) {
+  PSMTXRotTrig(m, axis, sinf(rad), cosf(rad));
+}
+#define MTXRotRad aurora_MTXRotRad
+#endif
 
-#define MTXRotDeg(m, axis, deg) C_MTXRotRad(m, axis, MTXDegToRad(deg))
-#define MTXRotAxisDeg(m, axis, deg) C_MTXRotAxisRad(m, axis, MTXDegToRad(deg))
+#define MTXRotDeg(m, axis, deg) MTXRotRad(m, axis, MTXDegToRad(deg))
+#define MTXRotAxisDeg(m, axis, deg) MTXRotAxisRad(m, axis, MTXDegToRad(deg))
 
 #define MTXReorder C_MTXReorder
 
@@ -241,13 +250,6 @@ f32 C_VECDistance(const Vec* a, const Vec* b);
 void C_VECReflect(const Vec* src, const Vec* normal, Vec* dst);
 void C_VECHalfAngle(const Vec* a, const Vec* b, Vec* half);
 
-void PSVECNormalize(const Vec* src, Vec* unit);
-f32 PSVECSquareMag(const Vec* v);
-f32 PSVECMag(const Vec* v);
-f32 PSVECSquareDistance(const Vec* a, const Vec* b);
-f32 PSVECDistance(const Vec* a, const Vec* b);
-
-#ifdef GEKKO
 void PSVECAdd(const Vec* a, const Vec* b, Vec* ab);
 void PSVECSubtract(const Vec* a, const Vec* b, Vec* a_b);
 void PSVECScale(const Vec* src, Vec* dst, f32 scale);
@@ -258,23 +260,16 @@ f32 PSVECDotProduct(const Vec* a, const Vec* b);
 void PSVECCrossProduct(const Vec* a, const Vec* b, Vec* axb);
 f32 PSVECSquareDistance(const Vec* a, const Vec* b);
 f32 PSVECDistance(const Vec* a, const Vec* b);
-#else
-#define PSVECAdd VECAdd
-#define PSVECSubtract VECSubtract
-#define PSVECScale VECScale
-#define PSVECDotProduct VECDotProduct
-#define PSVECCrossProduct VECCrossProduct
-#endif
 
 #if defined(MTX_USE_PS)
-#define VECAdd C_VECAdd
-#define VECSubtract C_VECSubtract
-#define VECScale C_VECScale
+#define VECAdd PSVECAdd
+#define VECSubtract PSVECSubtract
+#define VECScale PSVECScale
 #define VECNormalize PSVECNormalize
 #define VECSquareMag PSVECSquareMag
 #define VECMag PSVECMag
-#define VECDotProduct C_VECDotProduct
-#define VECCrossProduct C_VECCrossProduct
+#define VECDotProduct PSVECDotProduct
+#define VECCrossProduct PSVECCrossProduct
 #define VECSquareDistance PSVECSquareDistance
 #define VECDistance PSVECDistance
 #else // MTX_USE_C

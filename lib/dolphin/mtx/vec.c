@@ -44,22 +44,6 @@ void C_VECNormalize(const Vec* src, Vec* unit) {
   unit->z = src->z * mag;
 }
 
-void PSVECNormalize(const Vec* src, Vec* unit) {
-  f32 sqsum;
-  f32 rsqrt;
-
-  assert(src && "VECNormalize():  NULL VecPtr 'src' ");
-  assert(unit && "VECNormalize():  NULL VecPtr 'unit' ");
-
-  sqsum = (src->z * src->z + src->x * src->x) + src->y * src->y;
-  assert(0.0f != sqsum && "VECNormalize():  zero magnitude vector ");
-
-  rsqrt = ppc_rsqrte(sqsum);
-  unit->x = src->x * rsqrt;
-  unit->y = src->y * rsqrt;
-  unit->z = src->z * rsqrt;
-}
-
 f32 C_VECSquareMag(const Vec* v) {
   f32 sqmag;
 
@@ -84,15 +68,6 @@ f32 PSVECSquareMag(const Vec* v) {
 
 f32 C_VECMag(const Vec* v) {
   return sqrtf(C_VECSquareMag(v));
-}
-
-f32 PSVECMag(const Vec* v) {
-  f32 sqmag;
-  sqmag = PSVECSquareMag(v);
-  if (sqmag == 0.0f) {
-    return 0.0f;
-  }
-  return sqmag * ppc_rsqrte(sqmag);
 }
 
 f32 C_VECDotProduct(const Vec* a, const Vec* b) {
