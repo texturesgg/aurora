@@ -2,6 +2,7 @@
 
 #include "../gfx/recording.hpp"
 
+#include <atomic>
 #include <cmath>
 
 #include <tracy/Tracy.hpp>
@@ -11,6 +12,19 @@ namespace {
 constexpr Module Log{"aurora::gx"};
 
 bool is_alpha_bump_channel(GXChannelID id) { return id == GX_ALPHA_BUMP || id == GX_ALPHA_BUMPN; }
+
+Light normalize_light_dir(Light light) {
+  const double x = light.dir[0];
+  const double y = light.dir[1];
+  const double z = light.dir[2];
+  const double len = std::sqrt(x * x + y * y + z * z);
+  if (!std::isfinite(len)) {
+    light.dir = {0.f, 0.f, 0.f};
+  } else if (len > 0.0) {
+    light.dir = {static_cast<float>(x / len), static_cast<float>(y / len), static_cast<float>(z / len)};
+  }
+  return light;
+}
 
 Vec4<float> texture_size_bias(const gfx::TextureBind& tex) {
   auto width = static_cast<float>(tex.texObj.width());
@@ -307,6 +321,23 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
     }
   }
 
+  // Texgens can consume a color channel even when TEV never reads it directly.
+  // Include these channels before calculating lighting and uniform requirements.
+  for (int i = 0; i < info.sampledTexCoords.size(); ++i) {
+    if (!info.sampledTexCoords.test(i)) {
+      continue;
+    }
+    const auto& tcg = config.tcgs[i];
+    if (tcg.type >= GX_TG_BUMP0 && tcg.type <= GX_TG_BUMP7) {
+      continue;
+    }
+    if (tcg.src == GX_TG_COLOR0) {
+      info.sampledColorChannels.set(0);
+    } else if (tcg.src == GX_TG_COLOR1) {
+      info.sampledColorChannels.set(1);
+    }
+  }
+
   info.uniformSize += info.loadsTevReg.count() * sizeof(Vec4<float>);
   for (int i = 0; i < info.sampledColorChannels.size(); ++i) {
     if (info.sampledColorChannels.test(i)) {
@@ -369,6 +400,74 @@ ShaderInfo build_shader_info(const ShaderConfig& config) noexcept {
   return info;
 }
 
+static bool stage_samples_texture(const TevStage& stage) noexcept {
+  if (stage.texMapId == GX_TEXMAP_NULL) {
+    return false;
+  }
+  const auto isTexColor = [](GXTevColorArg arg) { return arg == GX_CC_TEXC || arg == GX_CC_TEXA; };
+  const auto& c = stage.colorPass;
+  const auto& a = stage.alphaPass;
+  return isTexColor(c.a) || isTexColor(c.b) || isTexColor(c.c) || isTexColor(c.d) || a.a == GX_CA_TEXA ||
+         a.b == GX_CA_TEXA || a.c == GX_CA_TEXA || a.d == GX_CA_TEXA;
+}
+
+static std::string describe_texturing(const ShaderConfig& config, u32 numTexGens) {
+  std::string out = fmt::format("numTexGens {} numTevStages {} numIndStages {}", numTexGens, config.tevStageCount,
+                                config.numIndStages);
+  for (u32 i = 0; i < config.tevStageCount; ++i) {
+    const auto& st = config.tevStages[i];
+    out += fmt::format("\n  tev{}: texCoord {} texMap {} channel {} color {} {} {} {} alpha {} {} {} {} | indStage {} "
+                       "indMtx {} wrap {} {} addPrev {}",
+                       i, underlying(st.texCoordId), underlying(st.texMapId), underlying(st.channelId),
+                       underlying(st.colorPass.a), underlying(st.colorPass.b), underlying(st.colorPass.c),
+                       underlying(st.colorPass.d), underlying(st.alphaPass.a), underlying(st.alphaPass.b),
+                       underlying(st.alphaPass.c), underlying(st.alphaPass.d), underlying(st.indTexStage),
+                       underlying(st.indTexMtxId), underlying(st.indTexWrapS), underlying(st.indTexWrapT),
+                       st.indTexAddPrev);
+  }
+  for (u32 i = 0; i < config.numIndStages; ++i) {
+    const auto& ind = config.indStages[i];
+    out += fmt::format("\n  ind{}: texCoord {} texMap {}", i, underlying(ind.texCoordId), underlying(ind.texMapId));
+  }
+  return out;
+}
+
+void validate_shader_config(const ShaderConfig& config, const ShaderInfo& info, u32 numTexGens) noexcept {
+  for (u32 i = 0; i < info.sampledTexCoords.size(); ++i) {
+    if (!info.sampledTexCoords.test(i)) {
+      continue;
+    }
+    const auto& tcg = config.tcgs[i];
+    if (tcg.src == GX_MAX_TEXGENSRC && !(tcg.type >= GX_TG_BUMP0 && tcg.type <= GX_TG_BUMP7)) {
+      UNLIKELY FATAL("GX: a stage reads texcoord {}, but no texgen makes it (undefined on console). Usually a "
+                     "TEV or indirect stage is still set from an earlier draw.\n{}",
+                     i, describe_texturing(config, numTexGens));
+    }
+    if (tcg.src >= GX_TG_TEX0 && tcg.src <= GX_TG_TEX7) {
+      const auto attr = static_cast<GXAttr>(GX_VA_TEX0 + (tcg.src - GX_TG_TEX0));
+      if (config.attrs[attr].attrType == GX_NONE) {
+        UNLIKELY FATAL("GX: texgen {} reads vertex attribute TEX{}, but the vertex descriptor does not have it "
+                       "(undefined on console). Usually the texgen or the TEV stage is still set from an "
+                       "earlier draw.\n{}",
+                       i, static_cast<int>(tcg.src - GX_TG_TEX0), describe_texturing(config, numTexGens));
+      }
+    }
+  }
+  for (u32 i = 0; i < config.tevStageCount; ++i) {
+    const auto& stage = config.tevStages[i];
+    if (stage.indTexMtxId != GX_ITM_OFF && stage.indTexStage >= config.numIndStages &&
+        stage_samples_texture(stage)) {
+      static std::atomic<u32> sReported{0};
+      if (sReported.fetch_add(1, std::memory_order_relaxed) < 8) {
+        Log.warn("GX: TEV stage {} uses indirect stage {}, but only {} indirect stages are enabled (undefined on "
+                 "console, drawn without the indirect offset). Usually the TEV stage is still set from an earlier "
+                 "draw.\n{}",
+                 i, underlying(stage.indTexStage), config.numIndStages, describe_texturing(config, numTexGens));
+      }
+    }
+  }
+}
+
 static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
   buf.reserve_extra(info.uniformSize);
 
@@ -417,7 +516,9 @@ static void fill_uniform(ByteBuffer& buf, const ShaderInfo& info) noexcept {
   if (info.lightingEnabled) {
     // Lights
     static_assert(sizeof(g_gxState.lights) == 80 * GX::MaxLights);
-    buf.append(g_gxState.lights);
+    for (const auto& light : g_gxState.lights) {
+      buf.append(normalize_light_dir(light));
+    }
     // Light state for all channels
     for (int i = 0; i < 4; ++i) {
       buf.append<u32>(g_gxState.colorChannelState[i].lightMask.to_ulong());

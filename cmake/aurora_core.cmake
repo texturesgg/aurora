@@ -5,6 +5,7 @@ add_library(aurora_core STATIC
         lib/gamepad.cpp
         lib/gamepad.hpp
         lib/input/binding.cpp
+        lib/input/names.cpp
         lib/input/capture.cpp
         lib/input/router.cpp
         lib/input/router.hpp
@@ -26,7 +27,10 @@ add_library(aurora_core STATIC
 add_library(aurora::core ALIAS aurora_core)
 set_target_properties(aurora_core PROPERTIES FOLDER "aurora")
 
-target_compile_definitions(aurora_core PUBLIC AURORA TARGET_PC)
+target_compile_definitions(aurora_core PUBLIC AURORA TARGET_PC=1)
+if (AURORA_RVL)
+    target_compile_definitions(aurora_core PUBLIC REVOLUTION=1)
+endif ()
 target_include_directories(aurora_core PUBLIC include)
 target_link_libraries(aurora_core PUBLIC fmt::fmt ${AURORA_SDL3_TARGET} xxHash::xxhash)
 target_link_libraries(aurora_core PRIVATE absl::btree absl::flat_hash_map sqlite3 Tracy::TracyClient)
@@ -51,6 +55,7 @@ if (CMAKE_SYSTEM_NAME STREQUAL Windows)
     endif ()
 elseif (APPLE)
     target_sources(aurora_core PRIVATE lib/system_info_mac.mm)
+    target_link_libraries(aurora_core PRIVATE "-framework Foundation")
 endif ()
 
 if (IOS)
@@ -61,7 +66,10 @@ if (IOS)
 endif ()
 
 if (AURORA_ENABLE_GX)
-    target_sources(aurora_core PRIVATE lib/imgui.cpp)
+    target_sources(aurora_core PRIVATE
+        lib/imgui.cpp
+        lib/imgui_input.cpp
+    )
     target_link_libraries(aurora_core PUBLIC imgui)
 endif ()
 

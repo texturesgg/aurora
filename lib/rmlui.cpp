@@ -426,7 +426,7 @@ void initialize(const AuroraWindowSize& size) noexcept {
   Rml::SetFileInterface(g_fileInterface);
 
   renderInterface->SetWindowSize(dim);
-  renderInterface->SetRenderTargetFormat(webgpu::g_graphicsConfig.surfaceConfiguration.format);
+  renderInterface->SetRenderTargetFormat(webgpu::g_efbFormat);
   renderInterface->CreateDeviceObjects();
 
   Rml::Initialise();
@@ -460,10 +460,17 @@ void set_glass_light_dir(float x, float y) noexcept {
   }
 }
 
-void set_input_type(InputType type) noexcept {
+void set_input_type(input::TextInputType type) noexcept {
   auto* systemInterface = static_cast<SystemInterface_Aurora*>(Backend::GetSystemInterface());
   if (systemInterface != nullptr) {
     systemInterface->SetInputType(type);
+  }
+}
+
+void set_input_layer(input::LayerId layer) noexcept {
+  auto* systemInterface = static_cast<SystemInterface_Aurora*>(Backend::GetSystemInterface());
+  if (systemInterface) {
+    systemInterface->SetInputLayer(layer);
   }
 }
 
@@ -529,7 +536,8 @@ InputResult process_input(const input::InputEvent& event) noexcept {
       [](const auto&) -> InputResult { return {}; });
 }
 
-RecordedFrame record_frame(const webgpu::Viewport& presentViewport) noexcept {
+RecordedFrame record_frame(const webgpu::Viewport& presentViewport,
+                           const webgpu::TextureWithSampler& sceneSource) noexcept {
   if (g_context == nullptr) {
     return {};
   }
@@ -547,7 +555,7 @@ RecordedFrame record_frame(const webgpu::Viewport& presentViewport) noexcept {
 
   auto* renderInterface = get_render_interface();
   renderInterface->SetWindowSize(g_context->GetDimensions());
-  renderInterface->BeginFrame(s_renderTarget, webgpu::present_source(),
+  renderInterface->BeginFrame(s_renderTarget, sceneSource,
                               needsBackdrop ? BaseLayerContent::Scene : BaseLayerContent::Transparent);
 
   Backend::BeginFrame();

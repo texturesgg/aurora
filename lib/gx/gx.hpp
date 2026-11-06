@@ -47,7 +47,6 @@ constexpr float GX_LARGE_NUMBER = -1048576.0f;
 namespace aurora::gx {
 constexpr bool EnableNormalVisualization = false;
 constexpr bool EnableDebugPrints = false;
-constexpr bool UsePerPixelLighting = false;
 constexpr bool UseReversedZ = true;
 
 constexpr u32 MaxTextures = GX_MAX_TEXMAP;
@@ -307,12 +306,6 @@ inline bool operator==(const AttrArray& lhs, const AttrArray& rhs) {
 inline bool operator!=(const AttrArray& lhs, const AttrArray& rhs) { return !(lhs == rhs); }
 
 struct GXState {
-  struct CopyTextureRef {
-    gfx::TextureHandle handle;
-    u32 revision = 0;
-
-    operator bool() const noexcept { return handle.operator bool(); }
-  };
   struct CopyTextureKey {
     const void* dest = nullptr;
     u32 width = 0;
@@ -327,6 +320,17 @@ struct GXState {
     friend H AbslHashValue(H h, const CopyTextureKey& key) {
       return H::combine(std::move(h), key.dest, key.width, key.height, key.format);
     }
+  };
+
+  struct CopyTextureRef {
+    gfx::TextureHandle handle;
+    u32 revision = 0;
+    CopyTextureKey key;
+    u32 width = 0;
+    u32 height = 0;
+    GXPixelFmt pixelFormat = GX_PF_RGB8_Z24;
+
+    operator bool() const noexcept { return handle.operator bool(); }
   };
 
   // Decoded state
@@ -407,9 +411,10 @@ struct GXState {
   bool texCopyDstWide = false;
   const void* texCopyDest = nullptr;
   absl::flat_hash_map<const void*, CopyTextureRef> copyTextures;
-  absl::flat_hash_map<CopyTextureKey, CopyTextureRef> copyTextureCache;
+  gfx::ClipRect dispCopySrc{0, 0, 640, 480};
 
   // Cache state
+  bool drawsBlocking = false;
   std::array<gfx::TextureBind, MaxTextures> textures;
   u16 lastVtxSize = 0;
   GXVtxFmt lastVtxFmt = GX_MAX_VTXFMT;
@@ -449,13 +454,18 @@ void set_render_viewport(const gfx::Viewport& viewport) noexcept;
 void set_logical_scissor(const gfx::ClipRect& scissor) noexcept;
 void set_render_scissor(const gfx::ClipRect& scissor) noexcept;
 void copy_tex(const void* dest, GXBool clear) noexcept;
+void copy_disp(GXBool clear) noexcept;
+void clear_efb(const gfx::ClipRect& logicalRect, bool wholeTarget, bool clearColor, bool clearAlpha, bool clearDepth,
+               GXColor color, u32 z) noexcept;
 const gfx::TextureBind& get_texture(GXTexMapID id) noexcept;
 void resolve_sampled_textures(const ShaderInfo& info) noexcept;
 
-inline float clear_depth_value() {
-  const float normalizedDepth = static_cast<float>(g_gxState.clearDepth) / 16777215.f;
+inline float clear_depth_value(u32 z) {
+  const float normalizedDepth = static_cast<float>(z) / 16777215.f;
   return UseReversedZ ? (1.f - normalizedDepth) : normalizedDepth;
 }
+
+inline float clear_depth_value() { return clear_depth_value(g_gxState.clearDepth); }
 
 static inline bool requires_load_conversion(const GXTexObj_& obj) {
   switch (obj.format()) {

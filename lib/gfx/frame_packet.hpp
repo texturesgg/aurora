@@ -4,13 +4,19 @@
 #include "types.hpp"
 #include "tex_palette_conv.hpp"
 #include "texture.hpp"
+#include "efb.hpp"
 
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <deque>
+#include <memory>
 #include <string>
 #include <vector>
+
+namespace aurora::gfx::readback {
+struct Job;
+}
 
 namespace aurora::gfx::detail {
 
@@ -93,6 +99,8 @@ struct RenderPass {
   wgpu::Texture snapshotColorDst;
   wgpu::TextureView snapshotDepthDst;
   wgpu::Texture snapshotNormalDst;
+  wgpu::Texture xfbDst;
+  ClipRect xfbRect;
   float clearDepthValue = 1.f;
   wgpu::LoadOp depthLoadOp = wgpu::LoadOp::Undefined;
   wgpu::StoreOp depthStoreOp = wgpu::StoreOp::Store;
@@ -105,12 +113,14 @@ struct RenderPass {
   bool hasStencil = false;
   bool hasDraws = false;
   bool discardable = false;
-  bool captureDepthSnapshot = false;
   bool sealed = false;
+  bool presentConsumer = false;
   std::vector<tex_palette_conv::ConvRequest> paletteConvs;
 
   RenderTargetLayout target_layout() const noexcept;
-  bool has_consumer() const { return resolveTarget || snapshotColorDst || snapshotDepthDst || snapshotNormalDst; }
+  bool has_consumer() const {
+    return resolveTarget || snapshotColorDst || snapshotDepthDst || snapshotNormalDst || xfbDst || presentConsumer;
+  }
   bool has_content() const {
     if (hasDraws || clearDepth) {
       return true;
@@ -166,10 +176,22 @@ struct EncoderTask {
   uint32_t payloadSize = 0;
 };
 
+struct ReadbackTask {
+  std::shared_ptr<readback::Job> job;
+};
+
+struct ResampleTask {
+  webgpu::TextureWithSampler source;
+  webgpu::TextureWithSampler destination;
+  Range uniformRange;
+};
+
 enum class FrameOpType : uint8_t {
   RenderPass,
   TextureCopy,
   EncoderTask,
+  Readback,
+  Resample,
 };
 
 struct FrameOp {
@@ -178,6 +200,8 @@ struct FrameOp {
   RenderPass* renderPass = nullptr;
   TextureCopy* textureCopy = nullptr;
   EncoderTask* encoderTask = nullptr;
+  ReadbackTask* readbackTask = nullptr;
+  ResampleTask* resampleTask = nullptr;
   StagingHighWater highWater;
   std::vector<const TextureUpload*> textureUploads;
 };
@@ -185,9 +209,13 @@ struct FrameOp {
 using RenderPassList = std::deque<RenderPass>;
 
 struct FramePacket {
+  efb::State efb;
   RenderPassList renderPasses;
   std::deque<TextureCopy> textureCopies;
   std::deque<EncoderTask> encoderTasks;
+  std::deque<ReadbackTask> readbackTasks;
+  std::deque<ResampleTask> resampleTasks;
+  std::vector<present::Request> presents;
   std::deque<FrameOp> ops;
   std::deque<TextureUpload> textureUploads;
 #ifdef AURORA_GFX_DEBUG_GROUPS

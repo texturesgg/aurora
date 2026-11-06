@@ -7,6 +7,7 @@
 #include <SDL3/SDL_rect.h>
 #include <SDL3/SDL_scancode.h>
 
+#include <array>
 #include <concepts>
 #include <cstdint>
 #include <optional>
@@ -83,6 +84,7 @@ struct InputSource {
     Mouse,
     Controller,
     Touch,
+    Device,
   };
 
   enum class Origin {
@@ -97,7 +99,49 @@ struct InputSource {
   bool operator==(const InputSource&) const = default;
 };
 
+enum class SensorKind : uint8_t {
+  Accel,
+  Gyro,
+  AccelLeft,
+  GyroLeft,
+  AccelRight,
+  GyroRight,
+};
+
+struct SensorSample {
+  std::array<float, 3> values{};
+  uint64_t sensorTimestampNs = 0;
+};
+
+using TextInputId = uint64_t;
+enum class TextInputType { Text, Number, Code };
+enum class TextInputState { Invalid, Pending, Suspended, Active, Failed };
+
+struct TextInputArea {
+  SDL_Rect rect{}; // Window coordinates
+  int cursorOffset = 0;
+
+  bool operator==(const TextInputArea& other) const {
+    return rect.x == other.rect.x && rect.y == other.rect.y && rect.w == other.rect.w && rect.h == other.rect.h &&
+           cursorOffset == other.cursorOffset;
+  }
+};
+
+struct TextInputOptions {
+  TextInputType type = TextInputType::Text;
+  bool multiline = false;
+  std::optional<TextInputArea> area;
+
+  bool operator==(const TextInputOptions&) const = default;
+};
+
 struct InputEvent {
+  struct SensorChanged {
+    SensorKind sensor = SensorKind::Accel;
+    std::array<float, 3> values{};
+    uint64_t sensorTimestampNs = 0;
+  };
+
   struct KeyChanged {
     SDL_Scancode scancode = SDL_SCANCODE_UNKNOWN; // Used for bindings
     SDL_Keycode keycode = SDLK_UNKNOWN;           // Layout-dependent, e.g. for UI shortcuts
@@ -151,6 +195,11 @@ struct InputEvent {
     int32_t length = -1;
   };
 
+  struct TextInputStateChanged {
+    TextInputId session = 0;
+    TextInputState state = TextInputState::Invalid;
+  };
+
   // Drop held state from the source.
   struct Cancelled {};
 
@@ -165,7 +214,7 @@ struct InputEvent {
   };
 
   using Payload = Enum<KeyChanged, ButtonChanged, AxisChanged, PointerChanged, Scroll, TextInput, TextEditing,
-                       Cancelled, SourceChanged>;
+                       Cancelled, SourceChanged, SensorChanged, TextInputStateChanged>;
 
   InputSource source;
   uint64_t timestampNs = 0;
@@ -218,6 +267,37 @@ struct LayerDescriptor {
 void unregister_layer(LayerId layer);
 void set_layer_enabled(LayerId layer, bool enabled);
 
+[[nodiscard]] TextInputId begin_text_input(LayerId layer, const TextInputOptions& options = {});
+bool update_text_input(TextInputId session, const TextInputOptions& options);
+void end_text_input(TextInputId session);
+[[nodiscard]] TextInputState text_input_state(TextInputId session);
+
+class TextInputSession {
+public:
+  TextInputSession() = default;
+  explicit TextInputSession(LayerId layer, const TextInputOptions& options = {})
+  : mId(begin_text_input(layer, options)) {}
+  ~TextInputSession() { reset(); }
+  TextInputSession(const TextInputSession&) = delete;
+  TextInputSession& operator=(const TextInputSession&) = delete;
+  TextInputSession(TextInputSession&& other) noexcept : mId(std::exchange(other.mId, 0)) {}
+  TextInputSession& operator=(TextInputSession&& other) noexcept {
+    if (this != &other) {
+      reset();
+      mId = std::exchange(other.mId, 0);
+    }
+    return *this;
+  }
+
+  void reset() { end_text_input(std::exchange(mId, 0)); }
+  bool update(const TextInputOptions& options) { return update_text_input(mId, options); }
+  [[nodiscard]] TextInputId id() const { return mId; }
+  [[nodiscard]] TextInputState state() const { return text_input_state(mId); }
+
+private:
+  TextInputId mId = 0;
+};
+
 // Re-evaluates captures and sends any cancellations.
 void reconcile();
 
@@ -230,6 +310,10 @@ void reconcile();
 [[nodiscard]] InputSource keyboard_source();
 [[nodiscard]] InputSource mouse_source();
 [[nodiscard]] InputSource touch_source();
+[[nodiscard]] InputSource device_source();
+[[nodiscard]] bool has_sensor(SourceId source, SensorKind sensor);
+bool set_sensor_enabled(SourceId source, SensorKind sensor, bool enabled);
+[[nodiscard]] std::optional<SensorSample> raw_sensor(SourceId source, SensorKind sensor);
 [[nodiscard]] std::vector<InputSource> sources();
 [[nodiscard]] std::optional<InputSource> find_source(SourceId source);
 // The controller's name, or the name given to create_source. Kept after disconnect.

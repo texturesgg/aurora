@@ -1,7 +1,6 @@
 #include "gx.hpp"
 #include "__gx.h"
 
-#include "../../gfx/tex_copy_conv.hpp"
 #include "../../gfx/texture.hpp"
 #include "../../gfx/recording.hpp"
 #include "../../window.hpp"
@@ -37,33 +36,53 @@ void copy_tex(const void* dest, GXBool clear) noexcept {
   const auto rect = map_logical_scissor(g_gxState.texCopySrc);
   const auto [dstWidth, dstHeight] = scale_copy_dst(g_gxState.texCopyDstWidth, g_gxState.texCopyDstHeight);
   const auto texCopyFmt = g_gxState.texCopyFmt;
-
-  const GXState::CopyTextureKey key{
+  const auto copy = texture::resolve_copy_texture({
       .dest = dest,
       .width = dstWidth,
       .height = dstHeight,
       .format = texCopyFmt,
-  };
-  auto it = g_gxState.copyTextureCache.find(key);
-  if (it == g_gxState.copyTextureCache.end()) {
-    gfx::TextureHandle handle;
-    if (gfx::tex_copy_conv::needs_conversion(texCopyFmt)) {
-      handle = gfx::new_conv_texture(dstWidth, dstHeight, texCopyFmt, "Copy Conv Texture");
-    } else {
-      handle = gfx::new_render_texture(dstWidth, dstHeight, GX_TF_RGBA8, "Resolved Texture");
-    }
-    it = g_gxState.copyTextureCache.emplace(key, GXState::CopyTextureRef{.handle = handle, .revision = 0}).first;
-  }
-  auto& handle = it->second;
+  });
+  auto& current = g_gxState.copyTextures[dest];
+  current.width = g_gxState.texCopyDstWidth;
+  current.height = g_gxState.texCopyDstHeight;
+  current.pixelFormat = g_gxState.pixelFmt;
 
   const auto clearColor = clear && g_gxState.colorUpdate;
   const auto clearAlpha = clear && g_gxState.alphaUpdate && efb_has_alpha(g_gxState.pixelFmt);
   const auto clearDepth = clear && g_gxState.depthUpdate;
-  gfx::resolve_pass_into(handle.handle, rect, clearColor, clearAlpha, clearDepth, g_gxState.clearColor,
+  gfx::resolve_pass_into(copy.handle, rect, clearColor, clearAlpha, clearDepth, g_gxState.clearColor,
                          clear_depth_value(), texCopyFmt, g_gxState.pixelFmt);
-  ++handle.revision;
-  g_gxState.copyTextures[dest] = handle;
-  texture::invalidate_bindings();
+}
+
+void copy_disp(GXBool clear) noexcept {
+  if (!g_config.emulateXfb) {
+    return;
+  }
+
+  const auto rect = map_logical_scissor(g_gxState.dispCopySrc);
+  const auto clearColor = clear && g_gxState.colorUpdate;
+  const auto clearAlpha = clear && g_gxState.alphaUpdate && efb_has_alpha(g_gxState.pixelFmt);
+  const auto clearDepth = clear && g_gxState.depthUpdate;
+  gfx::copy_disp(rect, clearColor, clearAlpha, clearDepth, g_gxState.clearColor, clear_depth_value());
+}
+
+void clear_efb(const gfx::ClipRect& logicalRect, bool wholeTarget, bool clearColor, bool clearAlpha, bool clearDepth,
+               GXColor color, u32 z) noexcept {
+  gfx::ClipRect rect;
+  if (wholeTarget) {
+    const auto [width, height] = gfx::get_render_target_size();
+    rect = {0, 0, static_cast<int32_t>(width), static_cast<int32_t>(height)};
+  } else {
+    rect = map_logical_scissor(logicalRect);
+  }
+  const Vec4 clearColorValue{
+      static_cast<float>(color.r) / 255.f,
+      static_cast<float>(color.g) / 255.f,
+      static_cast<float>(color.b) / 255.f,
+      static_cast<float>(color.a) / 255.f,
+  };
+  gfx::clear_rect(rect, clearColor, clearAlpha && efb_has_alpha(g_gxState.pixelFmt), clearDepth, clearColorValue,
+                  clear_depth_value(z));
 }
 } // namespace aurora::gx
 
@@ -151,7 +170,13 @@ void GXAdjustForOverscan(GXRenderModeObj* rmin, GXRenderModeObj* rmout, u16 hor,
   rmout->viYOrigin = in.viYOrigin + ver;
 }
 
-void GXSetDispCopySrc(u16 left, u16 top, u16 wd, u16 ht) {}
+void GXSetDispCopySrc(u16 left, u16 top, u16 wd, u16 ht) {
+  GX_WRITE_AURORA(GX_AURORA_LOAD_DISP_COPY_SRC);
+  GX_WRITE_U32(left);
+  GX_WRITE_U32(top);
+  GX_WRITE_U32(wd);
+  GX_WRITE_U32(ht);
+}
 
 void GXSetTexCopySrc(u16 left, u16 top, u16 wd, u16 ht) {
   GX_WRITE_AURORA(GX_AURORA_LOAD_COPY_SRC);
@@ -171,8 +196,9 @@ void GXSetTexCopyDst(u16 wd, u16 ht, GXTexFmt fmt, GXBool mipmap) {
   GX_WRITE_U8(mipmap != GX_FALSE);
 }
 
-// TODO GXSetDispCopyFrame2Field
-// TODO GXSetCopyClamp
+void GXSetDispCopyFrame2Field(GXCopyMode mode) {}
+
+void GXSetCopyClamp(GXFBClamp clamp) {}
 
 u32 GXSetDispCopyYScale(f32 vscale) { return 0; }
 
@@ -199,11 +225,18 @@ void GXSetCopyClear(GXColor color, u32 depth) {
   __gx->bpSent = 1;
 }
 
-void GXSetCopyFilter(GXBool aa, u8 sample_pattern[12][2], GXBool vf, u8 vfilter[7]) {}
+void GXSetCopyFilter(GXBool aa, const u8 sample_pattern[12][2], GXBool vf, const u8 vfilter[7]) {}
 
 void GXSetDispCopyGamma(GXGamma gamma) {}
 
-void GXCopyDisp(void* dest, GXBool clear) {}
+void GXCopyDisp(void* dest, GXBool clear) {
+  u32 reg = 0;
+  SET_REG_FIELD(0, reg, 1, 11, clear != GX_FALSE);
+  SET_REG_FIELD(0, reg, 1, 14, 1);
+  SET_REG_FIELD(0, reg, 8, 24, 0x52);
+  GX_WRITE_RAS_REG(reg);
+  aurora::gx::fifo::publish();
+}
 
 void GXCopyTex(void* dest, GXBool clear) {
   GX_WRITE_AURORA(GX_AURORA_LOAD_COPY_DEST);
@@ -216,8 +249,50 @@ void GXCopyTex(void* dest, GXBool clear) {
   aurora::gx::fifo::publish();
 }
 
-// TODO GXGetYScaleFactor
-// TODO GXGetNumXfbLines
+static u32 get_num_xfb_lines(u32 height, u32 scale) {
+  u32 actualHeight = (height - 1) * 0x100 / scale + 1;
+
+  u32 newScale = scale;
+  if (newScale > 0x80 && newScale < 0x100) {
+    while (newScale % 2 == 0) {
+      newScale /= 2;
+    }
+    if (height % newScale == 0) {
+      actualHeight++;
+    }
+  }
+
+  if (actualHeight > 0x400) {
+    actualHeight = 0x400;
+  }
+  return actualHeight;
+}
+
+f32 GXGetYScaleFactor(u16 efbHeight, u16 xfbHeight) {
+  u32 height1 = xfbHeight;
+  f32 scale1 = static_cast<f32>(xfbHeight) / static_cast<f32>(efbHeight);
+  u32 height2 = get_num_xfb_lines(efbHeight, static_cast<u32>(256.0f / scale1) & 0x1FF);
+
+  while (height2 > xfbHeight) {
+    height1--;
+    scale1 = static_cast<f32>(height1) / static_cast<f32>(efbHeight);
+    height2 = get_num_xfb_lines(efbHeight, static_cast<u32>(256.0f / scale1) & 0x1FF);
+  }
+
+  f32 scale2 = scale1;
+  while (height2 < xfbHeight) {
+    scale2 = scale1;
+    height1++;
+    scale1 = static_cast<f32>(height1) / static_cast<f32>(efbHeight);
+    height2 = get_num_xfb_lines(efbHeight, static_cast<u32>(256.0f / scale1) & 0x1FF);
+  }
+
+  return scale2;
+}
+
+u16 GXGetNumXfbLines(u16 efbHeight, f32 yScale) {
+  return get_num_xfb_lines(efbHeight, static_cast<u32>(256.0f / yScale) & 0x1FF);
+}
 // TODO GXClearBoundingBox
 // TODO GXReadBoundingBox
 }

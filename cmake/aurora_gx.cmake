@@ -1,9 +1,15 @@
 add_library(aurora_gx STATIC
         lib/gfx/clear.cpp
-        lib/gfx/depth_peek.cpp
+        lib/gfx/efb.cpp
         lib/gfx/encoding.cpp
         lib/gfx/frame.cpp
+        lib/gfx/present_target.cpp
         lib/gfx/pipeline_cache.cpp
+        lib/gfx/readback/color_layout.cpp
+        lib/gfx/readback/copy_pack.cpp
+        lib/gfx/readback/efb_gather.cpp
+        lib/gfx/readback/gpu.cpp
+        lib/gfx/readback/readback.cpp
         lib/gfx/recording.cpp
         lib/gfx/render_worker.cpp
         lib/gfx/resource_cache.cpp
@@ -22,6 +28,7 @@ add_library(aurora_gx STATIC
         lib/gx/gx.cpp
         lib/gx/texture.cpp
         lib/gx/pipeline.cpp
+        lib/gx/readback.cpp
         lib/gx/shader.cpp
         lib/gx/shader_info.cpp
         lib/dolphin/gx/GXBump.cpp

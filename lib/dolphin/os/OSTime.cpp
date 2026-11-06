@@ -16,15 +16,27 @@ using LocalTime = chrono::local_time<SystemDuration>;
 namespace {
 // GCN epoch: 2000-01-01 00:00:00 UTC = 946684800 seconds after Unix epoch
 constexpr SystemTime kGcnEpochUnix{946684800s};
-std::once_flag s_gameEpochOnce;
+constexpr LocalTime kGcnEpochLocal{946684800s};
+std::once_flag s_epochOnce;
+SystemDuration s_localOffset;
 OSTime s_gameEpochOffset;
 
+#if defined(__cpp_lib_chrono) && __cpp_lib_chrono >= 201907L && !_WIN32
+#define CHRONO_TIME_WORKS 1
+#else
+// Apple libc++ currently ships <chrono> with the C++20 timezone database API disabled
+// (_LIBCPP_HAS_TIME_ZONE_DATABASE == 0), so zoned_time/current_zone are unavailable there.
+//
+// Oh guess what, Microsoft's STL has broken time zone handling evidently,
+// breaks on the new (at the time of writing) Alberta Standard Time.
+// https://github.com/TwilitRealm/dusklight/issues/2734
+#define CHRONO_TIME_WORKS 0
+#endif
+
 LocalTime system_time_to_local_time(SystemTime time) {
-#if defined(__cpp_lib_chrono) && __cpp_lib_chrono >= 201907L
+#if CHRONO_TIME_WORKS
   return chrono::zoned_time(chrono::current_zone(), time).get_local_time();
 #else
-  // Apple libc++ currently ships <chrono> with the C++20 timezone database API disabled
-  // (_LIBCPP_HAS_TIME_ZONE_DATABASE == 0), so zoned_time/current_zone are unavailable there.
   const auto wholeSeconds = chrono::floor<chrono::seconds>(time);
   const auto fractionalSeconds = chrono::duration_cast<SystemDuration>(time - wholeSeconds);
   const std::time_t wallClock = chrono::system_clock::to_time_t(time);
@@ -48,35 +60,6 @@ LocalTime system_time_to_local_time(SystemTime time) {
 #endif
 }
 
-SystemTime local_time_to_system_time(LocalTime time) {
-#if defined(__cpp_lib_chrono) && __cpp_lib_chrono >= 201907L
-  return chrono::zoned_time(chrono::current_zone(), time).get_sys_time();
-#else
-  // Apple libc++ currently ships <chrono> with the C++20 timezone database API disabled
-  // (_LIBCPP_HAS_TIME_ZONE_DATABASE == 0), so zoned_time/current_zone are unavailable there.
-  const auto& localDays = chrono::floor<chrono::days>(time);
-  const chrono::year_month_day ymd{localDays};
-  const chrono::hh_mm_ss hms{chrono::floor<chrono::microseconds>(time - localDays)};
-
-  std::tm localTm{};
-  localTm.tm_sec = hms.seconds().count();
-  localTm.tm_min = hms.minutes().count();
-  localTm.tm_hour = hms.hours().count();
-  localTm.tm_mday = static_cast<unsigned int>(ymd.day());
-  localTm.tm_mon = static_cast<unsigned int>(ymd.month()) - 1;
-  localTm.tm_year = static_cast<int>(ymd.year()) - 1900;
-  localTm.tm_isdst = -1;
-
-  const std::time_t utcTime = mktime(&localTm);
-
-  AURORA_ASSERT(utcTime != -1, "mktime failed in local_time_to_system_time");
-  static_assert(std::is_same_v<std::chrono::microseconds, decltype(hms)::precision>,
-                "hms precision must be in microseconds");
-
-  return chrono::system_clock::from_time_t(utcTime) + hms.subseconds();
-#endif
-}
-
 template <typename Duration>
 OSTime duration_to_ticks(const Duration duration) {
   const auto seconds = chrono::floor<chrono::seconds>(duration);
@@ -85,22 +68,26 @@ OSTime duration_to_ticks(const Duration duration) {
          nanoseconds.count() * static_cast<OSTime>(OS_TIMER_CLOCK) / 1000000000LL;
 }
 
-void initialize_game_epoch() {
-  s_gameEpochOffset = OSGetSystemTime() - duration_to_ticks(aurora::time::game_clock::now().time_since_epoch());
+OSTime system_time_to_ticks(SystemTime time) { return duration_to_ticks(time - kGcnEpochUnix + s_localOffset); }
+
+void initialize_epochs() {
+  const SystemTime now = aurora::time::wall_clock::now();
+  s_localOffset = system_time_to_local_time(now).time_since_epoch() - now.time_since_epoch();
+  s_gameEpochOffset = system_time_to_ticks(now) - duration_to_ticks(aurora::time::game_clock::now().time_since_epoch());
 }
 } // namespace
 
 OSTick OSGetTick() { return OSGetTime() & 0xFFFFFFFF; }
 
 OSTime OSGetTime() {
-  std::call_once(s_gameEpochOnce, initialize_game_epoch);
+  std::call_once(s_epochOnce, initialize_epochs);
   return s_gameEpochOffset + duration_to_ticks(aurora::time::game_clock::now().time_since_epoch());
 }
 
 OSTime OSGetNativeTime() { return duration_to_ticks(aurora::time::native_clock::now().time_since_epoch()); }
 
 void AuroraInitClock() {
-  std::call_once(s_gameEpochOnce, initialize_game_epoch);
+  std::call_once(s_epochOnce, initialize_epochs);
   if (OSBaseAddress == 0) {
     return;
   }
@@ -109,10 +96,7 @@ void AuroraInitClock() {
 }
 
 void OSTicksToCalendarTime(OSTime ticks, OSCalendarTime* td) {
-  // We assume that all input times (ticks) are in UTC, relative to GCN epoch
-  // So convert that to the local time
-  const LocalTime local =
-      system_time_to_local_time(SystemTime{chrono::microseconds{OSTicksToMicroseconds(ticks)} + kGcnEpochUnix});
+  const LocalTime local = kGcnEpochLocal + chrono::microseconds{OSTicksToMicroseconds(ticks)};
 
   // Break up the time into the components we want
   const auto localDays = chrono::floor<chrono::days>(local);
@@ -147,9 +131,10 @@ OSTime OSCalendarTimeToTicks(OSCalendarTime* td) {
       chrono::hours{td->hour} + chrono::minutes{td->min} + chrono::seconds{td->sec} + chrono::milliseconds{td->msec} +
       chrono::microseconds{td->usec};
 
-  const SystemTime sys = local_time_to_system_time(local);
-
-  return OSMicrosecondsToTicks(chrono::duration_cast<chrono::microseconds>(sys - kGcnEpochUnix).count());
+  return OSMicrosecondsToTicks(chrono::duration_cast<chrono::microseconds>(local - kGcnEpochLocal).count());
 }
 
-OSTime OSGetSystemTime() { return duration_to_ticks(aurora::time::wall_clock::now() - kGcnEpochUnix); }
+OSTime OSGetSystemTime() {
+  std::call_once(s_epochOnce, initialize_epochs);
+  return system_time_to_ticks(aurora::time::wall_clock::now());
+}

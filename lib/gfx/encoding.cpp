@@ -3,8 +3,8 @@
 #include "frame.hpp"
 
 #include "clear.hpp"
-#include "depth_peek.hpp"
 #include "pipeline_cache.hpp"
+#include "readback/gpu.hpp"
 #include "tex_copy_conv.hpp"
 #include "tex_palette_conv.hpp"
 #include "../gx/gx.hpp"
@@ -249,11 +249,6 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
   render_pass(pass, frame, passInfo);
   pass.End();
 
-  if (passInfo.captureDepthSnapshot) {
-    depth_peek::encode_frame_snapshot(cmd, passInfo.copySourceDepthView,
-                                      passInfo.colorAttachments[SceneColorAttachmentIndex].size, passInfo.msaaSamples);
-  }
-
   if (passInfo.resolveTarget) {
     const auto& dstSize = passInfo.resolveTarget->size;
     const bool needsConversion = tex_copy_conv::needs_conversion(passInfo.resolveFormat);
@@ -329,6 +324,26 @@ void render(wgpu::CommandEncoder& cmd, FramePacket& frame, RenderPass& passInfo,
     const wgpu::Extent3D size{
         .width = passInfo.colorAttachments[SceneColorAttachmentIndex].size.width,
         .height = passInfo.colorAttachments[SceneColorAttachmentIndex].size.height,
+        .depthOrArrayLayers = 1,
+    };
+    cmd.CopyTextureToTexture(&src, &dst, &size);
+  }
+  if (passInfo.xfbDst) {
+    const webgpu::gpu_prof::Zone zone{cmd, "XFB copy"};
+    const wgpu::TexelCopyTextureInfo src{
+        .texture = passInfo.copySourceTexture,
+        .origin =
+            wgpu::Origin3D{
+                .x = static_cast<uint32_t>(passInfo.xfbRect.x),
+                .y = static_cast<uint32_t>(passInfo.xfbRect.y),
+            },
+    };
+    const wgpu::TexelCopyTextureInfo dst{
+        .texture = passInfo.xfbDst,
+    };
+    const wgpu::Extent3D size{
+        .width = static_cast<uint32_t>(passInfo.xfbRect.width),
+        .height = static_cast<uint32_t>(passInfo.xfbRect.height),
         .depthOrArrayLayers = 1,
     };
     cmd.CopyTextureToTexture(&src, &dst, &size);
@@ -419,6 +434,17 @@ void encode_op(wgpu::CommandEncoder& cmd, FramePacket& frame, const FrameOp& op)
   case FrameOpType::EncoderTask:
     if (op.encoderTask != nullptr) {
       execute_encoder_task(cmd, frame, *op.encoderTask);
+    }
+    break;
+  case FrameOpType::Readback:
+    if (op.readbackTask != nullptr) {
+      readback::gpu::encode_job(cmd, frame, op.readbackTask->job);
+    }
+    break;
+  case FrameOpType::Resample:
+    if (op.resampleTask != nullptr) {
+      const auto& [source, destination, uniformRange] = *op.resampleTask;
+      webgpu::resample(cmd, source, destination, resources().uniformBuffer, uniformRange.offset);
     }
     break;
   }

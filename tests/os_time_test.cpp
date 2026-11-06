@@ -5,6 +5,7 @@
 #include <gtest/gtest.h>
 
 #include <chrono>
+#include <ctime>
 
 namespace {
 
@@ -24,13 +25,50 @@ protected:
   void TearDown() override { aurora::time::internal::set_now_function(nullptr); }
 };
 
-TEST(OSTimeTest, SystemTimeUsesUtcGcnEpoch) {
-  constexpr auto gcnEpoch = 946684800s;
-  const auto expected =
-      std::chrono::duration_cast<std::chrono::seconds>(std::chrono::system_clock::now().time_since_epoch() - gcnEpoch);
-  const auto actual = std::chrono::seconds{OSTicksToSeconds(OSGetSystemTime())};
+std::chrono::seconds local_seconds_since_gcn_epoch() {
+  const std::time_t now = std::time(nullptr);
+  std::tm localTm{};
+#if defined(_WIN32)
+  localtime_s(&localTm, &now);
+#else
+  localtime_r(&now, &localTm);
+#endif
+  const auto local =
+      std::chrono::local_days{std::chrono::year{localTm.tm_year + 1900} / (localTm.tm_mon + 1) / localTm.tm_mday} +
+      std::chrono::hours{localTm.tm_hour} + std::chrono::minutes{localTm.tm_min} + std::chrono::seconds{localTm.tm_sec};
+  return local - std::chrono::local_days{std::chrono::year{2000} / 1 / 1};
+}
 
-  EXPECT_LE(std::chrono::abs(actual - expected), 1s);
+TEST(OSTimeTest, SystemTimeUsesLocalGcnEpoch) {
+  const auto actual = std::chrono::seconds{OSTicksToSeconds(OSGetSystemTime())};
+  EXPECT_LE(std::chrono::abs(actual - local_seconds_since_gcn_epoch()), 1s);
+}
+
+TEST(OSTimeTest, TimeUsesLocalGcnEpoch) {
+  const auto actual = std::chrono::seconds{OSTicksToSeconds(OSGetTime())};
+  EXPECT_LE(std::chrono::abs(actual - local_seconds_since_gcn_epoch()), 1s);
+}
+
+TEST(OSTimeTest, CalendarConversionIgnoresTimeZone) {
+  OSCalendarTime output{};
+  OSTicksToCalendarTime(0, &output);
+
+  EXPECT_EQ(output.sec, 0);
+  EXPECT_EQ(output.min, 0);
+  EXPECT_EQ(output.hour, 0);
+  EXPECT_EQ(output.mday, 1);
+  EXPECT_EQ(output.mon, 0);
+  EXPECT_EQ(output.year, 2000);
+
+  OSCalendarTime input{
+      .sec = 0,
+      .min = 0,
+      .hour = 0,
+      .mday = 2,
+      .mon = 0,
+      .year = 2000,
+  };
+  EXPECT_EQ(OSCalendarTimeToTicks(&input), OSSecondsToTicks(86400LL));
 }
 
 TEST(OSTimeTest, CalendarConversionRoundTripsLocalTime) {

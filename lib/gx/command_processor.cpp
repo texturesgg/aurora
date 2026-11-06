@@ -1,12 +1,12 @@
 #include "command_processor.hpp"
 
-#include "../gfx/depth_peek.hpp"
 #include "../gfx/recording.hpp"
 #include "../internal.hpp"
 #include "dolphin/gd/GDGeometry.h"
 #include "dolphin/gx/GXAurora.h"
 #include "gx.hpp"
 #include "pipeline.hpp"
+#include "readback.hpp"
 #include "regs.hpp"
 #include "shader_info.hpp"
 #include "texture.hpp"
@@ -406,6 +406,9 @@ static void push_gx_draw(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, gfx::Rang
     const auto prevSampledIndTextures = cache.shaderInfo.sampledIndTextures;
     populate_pipeline_config(cache.config, prim, fmt);
     cache.shaderInfo = build_shader_info(cache.config.shaderConfig);
+#ifndef NDEBUG
+    validate_shader_config(cache.config.shaderConfig, cache.shaderInfo, g_gxState.numTexGens);
+#endif
     cache.pipelineRef = gfx::pipeline_ref(cache.config);
     cache.targetLayoutKey = targetLayoutKey;
     cache.fmt = fmt;
@@ -488,6 +491,25 @@ static void handle_draw_unmerged(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, g
   push_gx_draw(prim, fmt, vtxCount, vertRange, idxRange, numIndices);
 }
 
+// Truncate vertex count to a valid number for the given primitive type
+static constexpr u16 trunc_vtx_count(GXPrimitive prim, u16 vtxCount) noexcept {
+  switch (prim) {
+  case GX_QUADS:
+    return vtxCount & ~3;
+  case GX_TRIANGLES:
+    return vtxCount - vtxCount % 3;
+  case GX_TRIANGLESTRIP:
+  case GX_TRIANGLEFAN:
+    return vtxCount < 3 ? 0 : vtxCount;
+  case GX_LINES:
+    return vtxCount & ~1;
+  case GX_LINESTRIP:
+    return vtxCount < 2 ? 0 : vtxCount;
+  default:
+    return vtxCount;
+  }
+}
+
 static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader& reader) noexcept {
   ZoneScoped;
   u32 vtxSize;
@@ -499,6 +521,11 @@ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader& 
   u32 totalVtxBytes = vtxCount * vtxSize;
   if (totalVtxBytes > reader.remaining())
     UNLIKELY { handle_draw_overrun(totalVtxBytes, reader); }
+  const auto vertexData = reader.take(totalVtxBytes);
+
+  vtxCount = trunc_vtx_count(prim, vtxCount);
+  if (vtxCount == 0)
+    UNLIKELY { return; }
 
   const bool cleanState = g_gxState.dirty == 0 && fmt == sDrawCache.lastDrawFmt && sDrawCache.lineMode == 0 &&
                           prim != GX_LINES && prim != GX_LINESTRIP && prim != GX_POINTS;
@@ -506,8 +533,7 @@ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader& 
   const bool canMerge = lastDraw != nullptr && lastDraw->instanceCount == 1;
 
   // Push raw vertex data to buffer. Merged draws must remain contiguous with the previous range.
-  const auto vertexData = reader.take(totalVtxBytes);
-  gfx::Range vertRange = gfx::push_verts(vertexData.data(), vertexData.size(), canMerge ? 0 : 4);
+  gfx::Range vertRange = gfx::push_verts(vertexData.data(), vtxCount * vtxSize, canMerge ? 0 : 4);
 
   // Try to merge with previous draw call
   if (canMerge) {
@@ -639,6 +665,17 @@ void handle_aurora(ByteReader& reader) noexcept {
       slot.texDataVersion = newTexDataVersion;
       g_gxState.dirty |= DirtyTextures;
     }
+  } else if (subCmd == GX_AURORA_SET_TEX_IMG_PTR) {
+    const auto texMapId = reader.read<u8>();
+    CHECK(texMapId < MaxTextures, "invalid texture map id {}", texMapId);
+    auto& slot = g_gxState.loadedTextures[texMapId];
+    const auto newData = reinterpret_cast<const void*>(reader.read<u64>());
+    if (slot.data != newData) {
+      slot.data = newData;
+      slot.texObjId = 0;
+      slot.texDataVersion = 0;
+      g_gxState.dirty |= DirtyTextures;
+    }
   } else if (subCmd == GX_AURORA_LOAD_TLUT) {
     const auto idx = reader.read<u8>();
     CHECK(idx < MaxTluts, "invalid tlut slot {}", idx);
@@ -677,6 +714,12 @@ void handle_aurora(ByteReader& reader) noexcept {
       g_gxState.clamp = clamp;
       g_gxState.dirty |= DirtyPipeline;
     }
+  } else if (subCmd == GX_AURORA_SET_DRAWS_BLOCKING) {
+    const bool blocking = reader.read<u8>() != 0;
+    if (g_gxState.drawsBlocking != blocking) {
+      g_gxState.drawsBlocking = blocking;
+      g_gxState.dirty |= DirtyPipeline;
+    }
   } else if (subCmd == GX_AURORA_LOAD_COPY_SRC) {
     const s32 left = reader.read<s32>();
     const s32 top = reader.read<s32>();
@@ -691,8 +734,16 @@ void handle_aurora(ByteReader& reader) noexcept {
     g_gxState.texCopyDstWide = true;
   } else if (subCmd == GX_AURORA_LOAD_COPY_DEST) {
     g_gxState.texCopyDest = reinterpret_cast<const void*>(reader.read<u64>());
-  } else if (subCmd == GX_AURORA_REQUEST_DEPTH_SNAPSHOT) {
-    gfx::depth_peek::request_snapshot();
+  } else if (subCmd == GX_AURORA_LOAD_DISP_COPY_SRC) {
+    const s32 left = reader.read<s32>();
+    const s32 top = reader.read<s32>();
+    const s32 width = reader.read<s32>();
+    const s32 height = reader.read<s32>();
+    g_gxState.dispCopySrc = {left, top, width, height};
+  } else if (subCmd == GX_AURORA_READBACK_CAPTURE_PEEKS) {
+    readback::handle_capture_peeks(reader);
+  } else if (subCmd == GX_AURORA_READBACK_CAPTURE_COPIES) {
+    readback::handle_capture_copies(reader);
   } else if (subCmd == GX_AURORA_BEGIN_OFFSCREEN) {
     const u32 width = reader.read<u32>();
     const u32 height = reader.read<u32>();
@@ -756,6 +807,17 @@ void handle_aurora(ByteReader& reader) noexcept {
   } else if (subCmd == GX_AURORA_DEBUG_MARKER_INSERT) {
     auto label = reader.read_string();
     gfx::insert_debug_marker(std::move(label));
+  } else if (subCmd == GX_AURORA_CLEAR) {
+    const auto flags = reader.read<u8>();
+    const gfx::ClipRect rect{
+        .x = static_cast<int32_t>(reader.read<u32>()),
+        .y = static_cast<int32_t>(reader.read<u32>()),
+        .width = static_cast<int32_t>(reader.read<u32>()),
+        .height = static_cast<int32_t>(reader.read<u32>()),
+    };
+    const GXColor color{reader.read<u8>(), reader.read<u8>(), reader.read<u8>(), reader.read<u8>()};
+    const auto z = reader.read<u32>();
+    clear_efb(rect, (flags & 0x08) != 0, (flags & 0x01) != 0, (flags & 0x02) != 0, (flags & 0x04) != 0, color, z);
   }
 
   else {

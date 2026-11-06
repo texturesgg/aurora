@@ -31,7 +31,9 @@ gtest_discover_tests(io_tests)
 add_executable(input_tests
   input_binding_test.cpp
   input_router_test.cpp
+  text_input_test.cpp
   ../lib/input/binding.cpp
+  ../lib/input/names.cpp
   ../lib/input/capture.cpp
   ../lib/input/router.cpp
   ../lib/input/source_state.cpp
@@ -55,6 +57,9 @@ target_include_directories(pad_adapter_tests PRIVATE
 target_link_libraries(pad_adapter_tests PRIVATE aurora::pad gtest gtest_main)
 if (AURORA_ENABLE_GX)
   target_link_libraries(pad_adapter_tests PRIVATE aurora::gx aurora::vi)
+  if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(pad_adapter_tests PRIVATE $<LINK_GROUP:RESCAN,aurora::gx,aurora::vi,aurora::core>)
+  endif ()
 endif ()
 aurora_copy_runtime_dlls(pad_adapter_tests)
 gtest_discover_tests(pad_adapter_tests)
@@ -80,9 +85,18 @@ target_include_directories(os_time_tests PRIVATE
   ../include
   ../lib
 )
-target_compile_definitions(os_time_tests PRIVATE AURORA TARGET_PC)
+target_compile_definitions(os_time_tests PRIVATE AURORA TARGET_PC=1)
 target_link_libraries(os_time_tests PRIVATE fmt::fmt gtest gtest_main)
 gtest_discover_tests(os_time_tests)
+
+add_executable(os_utf_tests
+  os_utf_test.cpp
+  ../lib/dolphin/os/OSUtf.cpp
+)
+target_include_directories(os_utf_tests PRIVATE ../include)
+target_compile_definitions(os_utf_tests PRIVATE AURORA TARGET_PC=1)
+target_link_libraries(os_utf_tests PRIVATE gtest gtest_main)
+gtest_discover_tests(os_utf_tests)
 
 if (AURORA_ENABLE_GX)
   # GX FIFO round-trip tests
@@ -113,12 +127,15 @@ if (AURORA_ENABLE_GX)
     # FIFO/command processor (encoder + decoder)
     ../lib/gx/fifo.cpp
     ../lib/gx/command_processor.cpp
+    ../lib/gx/readback.cpp
     ../lib/gx/regs.cpp
+    ../lib/gfx/readback/readback.cpp
     ../lib/thread.cpp
     # Display list reader/optimizer
     ../lib/gx/attr_fmt.cpp
     ../lib/gx/dl.cpp
     gx_dl_test.cpp
+    gx_readback_test.cpp
   )
 
   target_include_directories(gx_fifo_tests PRIVATE
@@ -127,7 +144,7 @@ if (AURORA_ENABLE_GX)
     ../lib/dolphin/gx
   )
 
-  target_compile_definitions(gx_fifo_tests PRIVATE AURORA TARGET_PC)
+  target_compile_definitions(gx_fifo_tests PRIVATE AURORA TARGET_PC=1)
 
   target_link_libraries(gx_fifo_tests PRIVATE
     gtest
@@ -152,7 +169,7 @@ if (AURORA_ENABLE_GX)
     ../include
     ../lib
   )
-  target_compile_definitions(gx_texture_cache_tests PRIVATE AURORA TARGET_PC)
+  target_compile_definitions(gx_texture_cache_tests PRIVATE AURORA TARGET_PC=1)
   target_link_libraries(gx_texture_cache_tests PRIVATE
     gtest
     gtest_main
@@ -166,6 +183,11 @@ if (AURORA_ENABLE_GX)
   aurora_copy_runtime_dlls(gx_texture_cache_tests)
   gtest_discover_tests(gx_texture_cache_tests)
 
+  add_executable(lru_cache_tests lru_cache_test.cpp)
+  target_include_directories(lru_cache_tests PRIVATE ../lib)
+  target_link_libraries(lru_cache_tests PRIVATE gtest gtest_main absl::flat_hash_map)
+  gtest_discover_tests(lru_cache_tests)
+
   add_executable(texture_replacement_streaming_tests
     texture_replacement_streaming_test.cpp
   )
@@ -173,7 +195,7 @@ if (AURORA_ENABLE_GX)
     ../include
     ../lib
   )
-  target_compile_definitions(texture_replacement_streaming_tests PRIVATE AURORA TARGET_PC)
+  target_compile_definitions(texture_replacement_streaming_tests PRIVATE AURORA TARGET_PC=1)
   target_link_libraries(texture_replacement_streaming_tests PRIVATE
     aurora::gx
     aurora::vi
@@ -193,7 +215,7 @@ if (AURORA_ENABLE_GX)
     ../include
     ../lib
   )
-  target_compile_definitions(render_worker_tests PRIVATE AURORA TARGET_PC)
+  target_compile_definitions(render_worker_tests PRIVATE AURORA TARGET_PC=1)
   target_link_libraries(render_worker_tests PRIVATE
     gtest
     gtest_main
@@ -210,15 +232,47 @@ if (AURORA_ENABLE_GX)
     ../include
     ../lib
   )
-  target_compile_definitions(gfx_recording_tests PRIVATE AURORA TARGET_PC)
+  target_compile_definitions(gfx_recording_tests PRIVATE AURORA TARGET_PC=1)
   target_link_libraries(gfx_recording_tests PRIVATE
     aurora::gx
     aurora::vi
+    absl::flat_hash_map
     gtest
     gtest_main
   )
   aurora_copy_runtime_dlls(gfx_recording_tests)
   gtest_discover_tests(gfx_recording_tests)
+
+  add_executable(gfx_readback_tests
+    gfx_readback_test.cpp
+  )
+  target_include_directories(gfx_readback_tests PRIVATE
+    ../include
+    ../lib
+  )
+  target_compile_definitions(gfx_readback_tests PRIVATE AURORA TARGET_PC=1)
+  target_link_libraries(gfx_readback_tests PRIVATE
+    aurora::gx
+    aurora::vi
+    absl::flat_hash_map
+    gtest
+    gtest_main
+  )
+  aurora_copy_runtime_dlls(gfx_readback_tests)
+  gtest_discover_tests(gfx_readback_tests)
+
+  add_executable(present_target_tests present_target_test.cpp)
+  target_include_directories(present_target_tests PRIVATE ../include ../lib)
+  target_compile_definitions(present_target_tests PRIVATE AURORA TARGET_PC=1)
+  target_link_libraries(present_target_tests PRIVATE aurora::gx aurora::vi gtest gtest_main)
+  if (CMAKE_SYSTEM_NAME STREQUAL "Darwin")
+    target_link_libraries(present_target_tests PRIVATE "-framework AppKit" "-framework QuartzCore")
+  endif ()
+  if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(present_target_tests PRIVATE $<LINK_GROUP:RESCAN,aurora::gx,aurora::vi,aurora::core>)
+  endif ()
+  aurora_copy_runtime_dlls(present_target_tests)
+  gtest_discover_tests(present_target_tests)
 endif () # AURORA_ENABLE_GX
 
 # DVD API tests
@@ -248,6 +302,44 @@ add_executable(os_alloc_tests
 target_include_directories(os_alloc_tests PRIVATE
   ../include
 )
-target_compile_definitions(os_alloc_tests PRIVATE AURORA TARGET_PC)
+target_compile_definitions(os_alloc_tests PRIVATE AURORA TARGET_PC=1)
 target_link_libraries(os_alloc_tests PRIVATE gtest gtest_main fmt::fmt)
 gtest_discover_tests(os_alloc_tests)
+
+add_executable(input_profile_tests input_profiles_test.cpp)
+target_include_directories(input_profile_tests PRIVATE ../include ../lib)
+target_link_libraries(input_profile_tests PRIVATE aurora::pad aurora::si gtest gtest_main absl::flat_hash_map)
+aurora_copy_runtime_dlls(input_profile_tests)
+gtest_discover_tests(input_profile_tests)
+
+add_executable(wpad_tests wpad_test.cpp wpad_header_test.c)
+target_include_directories(wpad_tests PRIVATE ../include ../lib)
+target_link_libraries(wpad_tests PRIVATE aurora::kpad gtest gtest_main absl::flat_hash_map)
+aurora_copy_runtime_dlls(wpad_tests)
+gtest_discover_tests(wpad_tests)
+
+add_executable(wpad_pad_tests wpad_pad_test.cpp)
+target_include_directories(wpad_pad_tests PRIVATE ../include ../lib)
+target_link_libraries(wpad_pad_tests PRIVATE aurora::kpad gtest gtest_main absl::flat_hash_map)
+aurora_copy_runtime_dlls(wpad_pad_tests)
+gtest_discover_tests(wpad_pad_tests)
+
+if (AURORA_ENABLE_GX)
+  foreach (input_test_target input_profile_tests wpad_tests wpad_pad_tests)
+    target_link_libraries(${input_test_target} PRIVATE aurora::gx aurora::vi)
+    if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+      target_link_libraries(${input_test_target} PRIVATE $<LINK_GROUP:RESCAN,aurora::gx,aurora::vi,aurora::core,PNG::PNG>)
+    endif ()
+  endforeach ()
+endif ()
+
+if (AURORA_ENABLE_GX)
+  add_executable(imgui_input_tests imgui_input_test.cpp)
+  target_include_directories(imgui_input_tests PRIVATE ../include ../lib)
+  target_link_libraries(imgui_input_tests PRIVATE aurora::gx aurora::vi gtest gtest_main)
+  if (CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    target_link_libraries(imgui_input_tests PRIVATE $<LINK_GROUP:RESCAN,aurora::gx,aurora::vi,aurora::core>)
+  endif ()
+  aurora_copy_runtime_dlls(imgui_input_tests)
+  gtest_discover_tests(imgui_input_tests)
+endif ()

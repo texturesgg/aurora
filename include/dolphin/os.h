@@ -48,6 +48,7 @@ extern "C" {
 #include <dolphin/os/OSSemaphore.h>
 #include <dolphin/os/OSUtf.h>
 #include <dolphin/os/OSTimer.h>
+#include <dolphin/os/OSStopwatch.h>
 
 // private macro, maybe shouldn't be defined here?
 #define OFFSET(addr, align) (((u32)(addr) & ((align)-1)))
@@ -97,8 +98,13 @@ u8 __gUnknown800030E3 AT_ADDRESS(OS_BASE_CACHED | 0x30E3);
 #endif
 
 #define OS_TIMER_CLOCK_DIVIDER 4
+#ifdef REVOLUTION
+#define OS_BUS_CLOCK   243000000
+#define OS_CORE_CLOCK  729000000
+#else
 #define OS_BUS_CLOCK   162000000
 #define OS_CORE_CLOCK  162000000
+#endif
 #define OS_TIMER_CLOCK (OS_BUS_CLOCK/OS_TIMER_CLOCK_DIVIDER)
 
 #define OSTicksToSeconds(ticks)      ((ticks)   / (OS_TIMER_CLOCK))
@@ -156,28 +162,10 @@ typedef struct OSBootInfo_s {
     u32 FSTMaxLength;
 } OSBootInfo;
 
-typedef struct OSStopwatch {
-    char* name;
-    u32 hits;
-    OSTime total;
-    OSTime min;
-    OSTime max;
-    OSTime last;
-    BOOL running;
-    u32 _padding;
-} OSStopwatch;
-
-void OSInitStopwatch(OSStopwatch* sw, char* name);
-void OSStartStopwatch(OSStopwatch* sw);
-void OSStopStopwatch(OSStopwatch* sw);
-OSTime OSCheckStopwatch(OSStopwatch* sw);
-void OSResetStopwatch(OSStopwatch* sw);
-void OSDumpStopwatch(OSStopwatch* sw);
-
 OSTick OSGetTick(void);
 /**
- * Get the current time, in ticks since GCN epoch (2000-01-01 00:00:00 UTC).
- * Monotonic, scaled by aurora_set_timescale, and pauses when backgrounded.
+ * Get the current time, in ticks since GCN epoch (2000-01-01 00:00:00 local time).
+ * Monotonic (does not follow host time changes), scaled by aurora_set_timescale, and pauses when backgrounded.
  */
 OSTime OSGetTime(void);
 void OSTicksToCalendarTime(OSTime ticks, OSCalendarTime* td);
@@ -187,12 +175,13 @@ BOOL OSDisableInterrupts(void);
 BOOL OSRestoreInterrupts(BOOL level);
 
 /**
- * Aurora extension: get the system time, in ticks since GCN epoch (2000-01-01 00:00:00 UTC).
- * Not guaranteed to increase monotonically and not converted to the local time zone.
+ * Aurora extension: get the host's wall-clock time, in ticks since GCN epoch (2000-01-01 00:00:00 local time).
+ * Uses the same local offset as OSGetTime, but is unscaled and keeps running while paused.
+ * Follows host clock changes, so it is not guaranteed to increase monotonically.
  */
 OSTime OSGetSystemTime(void);
 /**
- * Aurora extension: get the unscaled monotonic time, in ticks since GCN epoch (2000-01-01 00:00:00 UTC).
+ * Aurora extension: get the unscaled monotonic time, in ticks from an arbitrary epoch.
  * Use only for elapsed-time measurements.
  */
 OSTime OSGetNativeTime(void);
