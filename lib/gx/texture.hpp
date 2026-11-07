@@ -32,6 +32,10 @@ const TextureStats& texture_stats() noexcept;
 namespace texture {
 constexpr uint64_t ContentCacheBudgetBytes = 128ull * 1024ull * 1024ull;
 constexpr uint64_t ObjectCacheIdleFrames = 600;
+// Every GXInitTexObj/GXInitTlutObj takes a new object ID, so the object caches hold about
+// ObjectCacheIdleFrames frames' worth of entries; sweeping them for idle entries every frame
+// costs more than drawing. They are swept once every this many frames.
+constexpr uint64_t ObjectCacheSweepFrames = 60;
 constexpr bool AsyncTextureReplacements = true;
 constexpr uint32_t ReplacementThumbnailDim = 64;
 constexpr uint64_t ReplacementPublishBudgetBytes = 12ull * 1024ull * 1024ull;

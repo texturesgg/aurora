@@ -738,7 +738,9 @@ void end_frame() noexcept {
   s_stats.publishBytes = streamingStats.publishBytes;
   ++s_frameCount;
   apply_pending_invalidations();
-  sweep_object_caches();
+  if (s_frameCount % texture::ObjectCacheSweepFrames == 0) {
+    sweep_object_caches();
+  }
   s_copyCache.end_frame();
   s_contentCache.end_frame();
   update_cache_stats();
