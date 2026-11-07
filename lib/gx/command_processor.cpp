@@ -10,6 +10,7 @@
 #include "regs.hpp"
 #include "shader_info.hpp"
 #include "texture.hpp"
+#include "../webgpu/gpu.hpp"
 
 #include <tracy/Tracy.hpp>
 
@@ -22,6 +23,10 @@
 namespace aurora::gx::fifo {
 namespace {
 constexpr Module Log{"aurora::gx::fifo"};
+
+// The Null backend draws nothing anyone sees, so draws are read past instead of being turned into
+// GPU commands. Everything else in the stream (state, copies, draw done) is still processed.
+bool discard_draws() noexcept { return webgpu::g_backendType == wgpu::BackendType::Null; }
 
 u16 prepare_idx_buffer(ByteBuffer& buf, GXPrimitive prim, u16 vtxStart, u16 vtxCount) noexcept {
   u16 numIndices = 0;
@@ -524,7 +529,7 @@ static void draw_prim(GXPrimitive prim, GXVtxFmt fmt, u16 vtxCount, ByteReader& 
   const auto vertexData = reader.take(totalVtxBytes);
 
   vtxCount = trunc_vtx_count(prim, vtxCount);
-  if (vtxCount == 0)
+  if (vtxCount == 0 || discard_draws())
     UNLIKELY { return; }
 
   const bool cleanState = g_gxState.dirty == 0 && fmt == sDrawCache.lastDrawFmt && sDrawCache.lineMode == 0 &&
@@ -786,6 +791,10 @@ void handle_aurora(ByteReader& reader) noexcept {
     const size_t idxBytes = static_cast<size_t>(indexCount) * sizeof(u16);
     // Index data is always host-endian; push it to the GPU buffer as-is
     const auto indexData = reader.take(idxBytes);
+    if (discard_draws()) {
+      reader.take(vtxCount * calc_vtx_size(fmt));
+      return;
+    }
     const gfx::Range idxRange = gfx::push_indices(indexData.data(), indexData.size(), 4);
     u32 vtxSize;
     if (g_gxState.lastVtxFmt == fmt) {
