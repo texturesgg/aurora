@@ -202,6 +202,9 @@ uint32_t aurora_async_posts();
 const AuroraEvent* aurora_update();
 bool aurora_begin_frame();
 void aurora_end_frame();
+/* Ends the frame without presenting it: its drawing is submitted, nothing reaches
+ * the window. For frames a game runs and draws faster than it shows them. */
+void aurora_end_frame_unshown();
 
 void aurora_set_log_level(AuroraLogLevel level);
 void aurora_set_pause_on_focus_lost(bool value);

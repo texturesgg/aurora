@@ -291,7 +291,7 @@ bool begin_frame() noexcept {
   return true;
 }
 
-void end_frame() noexcept {
+void end_frame(bool shown) noexcept {
   ZoneScoped;
 #ifdef AURORA_ENABLE_GX
   gx::fifo::drain();
@@ -307,7 +307,8 @@ void end_frame() noexcept {
   wgpu::BindGroup rmlBindGroup;
   bool rmlOverlay = false;
 #ifdef AURORA_ENABLE_RMLUI
-  if (efb.xfb.state && efb.xfb.size.native_fb_width && efb.xfb.size.native_fb_height && rmlui::is_initialized()) {
+  if (shown && efb.xfb.state && efb.xfb.size.native_fb_width && efb.xfb.size.native_fb_height &&
+      rmlui::is_initialized()) {
     const auto source = gfx::detail::xfb_present_source();
     const auto viewport = webgpu::calculate_present_viewport(
         efb.xfb.size.native_fb_width, efb.xfb.size.native_fb_height, source.size.width, source.size.height);
@@ -316,7 +317,9 @@ void end_frame() noexcept {
     rmlOverlay = rmlFrame.overlay;
   }
 #endif
-  gfx::detail::record_xfb_present(std::move(drawData), std::move(rmlBindGroup), rmlOverlay);
+  if (shown) {
+    gfx::detail::record_xfb_present(std::move(drawData), std::move(rmlBindGroup), rmlOverlay);
+  }
   gfx::end_frame([](wgpu::CommandEncoder& encoder, std::vector<gfx::AfterSubmitCallback> callbacks) {
     constexpr wgpu::CommandBufferDescriptor cmdBufDescriptor{.label = "Redraw command buffer"};
     const auto commands = encoder.Finish(&cmdBufDescriptor);
@@ -361,7 +364,8 @@ void aurora_shutdown() { aurora::shutdown(); }
 uint32_t aurora_async_posts() { return aurora::g_asyncPosts.load(std::memory_order_relaxed); }
 const AuroraEvent* aurora_update() { return aurora::update(); }
 bool aurora_begin_frame() { return aurora::begin_frame(); }
-void aurora_end_frame() { aurora::end_frame(); }
+void aurora_end_frame() { aurora::end_frame(true); }
+void aurora_end_frame_unshown() { aurora::end_frame(false); }
 SDL_Window* aurora_get_window() { return aurora::window::get_sdl_window(); }
 AuroraWindowSize aurora_get_window_size() { return aurora::window::get_window_size(); }
 
