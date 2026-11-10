@@ -20,6 +20,10 @@ private:
     bool opened = false;
     bool deleted = false;
     bool dirty = false;
+    // The whole file as the next commit writes it, once something was written to
+    // it; empty while it's as on disk. Commit replaces the file whole, so a
+    // crash or kill leaves the old file or the new one, never half of each.
+    std::vector<uint8_t> image;
   };
 
   std::vector<GciFile> m_files;

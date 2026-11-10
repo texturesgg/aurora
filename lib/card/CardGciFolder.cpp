@@ -307,13 +307,19 @@ ECardResult CardGciFolder::fileWrite(FileHandle& fh, const void* buf, size_t siz
     if (fh.offset < 0 || static_cast<size_t>(fh.offset) > dataSize || size > dataSize - fh.offset) {
       return ECardResult::LIMIT;
     }
-    FileIO fileIO(m_folderPath / file->filename);
-    if (fileIO) {
-      if (fileIO.fileWrite(buf, size, sizeof(File) + fh.offset))
-        return ECardResult::READY;
-      return ECardResult::IOERROR;
+    if (file->image.empty()) {
+      auto contents = io::read_file(m_folderPath / file->filename);
+      if (!contents) {
+        return ECardResult::NOFILE;
+      }
+      if (contents->size() != file->fileSize) {
+        return ECardResult::IOERROR;
+      }
+      file->image = std::move(*contents);
     }
-    return ECardResult::NOFILE;
+    std::memcpy(file->image.data() + sizeof(File) + fh.offset, buf, size);
+    file->dirty = true; // the next commit writes it
+    return ECardResult::READY;
   }
 
   return ECardResult::NOCARD;
@@ -325,6 +331,10 @@ ECardResult CardGciFolder::fileRead(FileHandle& fh, void* dst, size_t size) {
     const size_t dataSize = file->fileSize - sizeof(File);
     if (fh.offset < 0 || static_cast<size_t>(fh.offset) > dataSize || size > dataSize - fh.offset) {
       return ECardResult::LIMIT;
+    }
+    if (!file->image.empty()) {
+      std::memcpy(dst, file->image.data() + sizeof(File) + fh.offset, size);
+      return ECardResult::READY;
     }
     FileIO fileIO(m_folderPath / file->filename);
     if (fileIO) {
@@ -499,10 +509,27 @@ ECardResult CardGciFolder::commit() {
     if (gciFile.deleted || !gciFile.dirty) {
       continue;
     }
-    FileIO file{m_folderPath / gciFile.filename};
-    File tempFile = gciFile.file;
-    tempFile.swapEndian();
-    if (!file || !file.fileWrite(&tempFile, sizeof(File), 0)) {
+    // The whole file, header and data, to a temporary file that then replaces
+    // it: a crash or kill mid-write leaves the old file whole
+    const auto path = m_folderPath / gciFile.filename;
+    if (gciFile.image.empty()) {
+      auto contents = io::read_file(path);
+      if (contents && contents->size() == gciFile.fileSize) {
+        gciFile.image = std::move(*contents);
+      }
+    }
+    bool written = false;
+    if (gciFile.image.size() == gciFile.fileSize) {
+      File diskHeader = gciFile.file;
+      diskHeader.swapEndian();
+      std::memcpy(gciFile.image.data(), &diskHeader, sizeof(File));
+      written = io::write_file_atomic(path, gciFile.image);
+    }
+    gciFile.image.clear();
+    if (!written) {
+      // The file on disk is as it was: go back to its header
+      FileIO file{path};
+      File tempFile;
       if (file && file.fileRead(&tempFile, sizeof(File), 0)) {
         tempFile.swapEndian();
         gciFile.file = tempFile;
